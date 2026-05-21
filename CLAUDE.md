@@ -116,7 +116,7 @@ Scheduled jobs use Spring `@Scheduled` with ShedLock for distributed locking acr
 ```java
 @Scheduled(cron = "0 0 3 * * *")
 @SchedulerLock(name = "myJob", lockAtMostFor = "30m", lockAtLeastFor = "5m")
-public void myJob() { ... }
+public void myJob(){}
 ```
 
 When running multiple replicas, only one instance executes per schedule tick. In dev (single instance), lock is immediate.
