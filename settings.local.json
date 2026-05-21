@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\crawlerenergie\\\\project\\\\crawler-backend\" -Force)",
+      "Bash(Select-Object Name, Mode)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(Get-ChildItem -Path \"C:\\\\crawlerenergie\\\\project\\\\crawler-backend\\\\src\\\\main\\\\java\\\\nl\\\\crawler\\\\custom\\\\offer\" -Recurse -File)",
+      "Bash(Select-Object FullName)"
+    ]
+  }
+}
