@@ -7,18 +7,5 @@
       "Bash(Get-ChildItem -Path \"C:\\\\crawlerenergie\\\\project\\\\crawler-backend\\\\src\\\\main\\\\java\\\\nl\\\\crawler\\\\custom\\\\offer\" -Recurse -File)",
       "Bash(Select-Object FullName)"
     ]
-  },
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "powershell -NoProfile -File .claude/hooks/english-coach-reminder.ps1"
-          }
-        ]
-      }
-    ]
   }
 }

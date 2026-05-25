@@ -1,1 +1,0 @@
-- [English Coach Hook](memory/project_english_coach_hook.md) — UserPromptSubmit hook tại .claude/hooks/, trigger chỉ khi toàn tiếng Anh, PowerShell encoding lessons
