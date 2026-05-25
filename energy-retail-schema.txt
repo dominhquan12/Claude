@@ -1,0 +1,629 @@
+// ============================================================
+// Energy Retail Platform — Netherlands
+// Database Schema (dbdiagram.io / DBML format)
+// ============================================================
+// Bounded Contexts:
+//   1. Customer Management
+//   2. CRM / Sales
+//   3. Contract Management
+//   4. Metering
+//   5. Pricing Engine
+//   6. Billing
+//   7. Supplier Management
+//   8. Payment
+//
+// Key architectural decisions:
+//   - Unified LegalEntity + Role (no separate customer/supplier tables)
+//   - Versioned Tariff Engine (effective_from / effective_to, immutable)
+//   - Multi-site Contract with lifecycle versioning
+//   - Invoice immutability — corrections via Credit/Debit Note
+//   - Billing model: Voorschot (monthly fixed) + Eindafrekening (annual settlement)
+//   - Raw consumption in Time-series DB (TimescaleDB/InfluxDB) — only metadata here
+//   - B2B hierarchy: Group → Subsidiary → Site (max depth 4)
+//   - persons table: anchor between Keycloak (keycloak_sub immutable) and contact roles
+//   - contacts use person_id (not email) — one person can have roles across multiple legal entities
+//   - Keycloak account created immediately on contact add (SUBMITTER/BILLING_CONTACT/AUTHORIZED_SIGNATORY)
+//   - INVOICE_RECIPIENT: email only, no Keycloak account
+// ============================================================
+
+
+// ============================================================
+// BOUNDED CONTEXT: Customer Management
+// ============================================================
+
+Table legal_entities {
+  id              uuid        [pk]
+  name            varchar(255) [not null]
+  legal_name      varchar(255)
+  kvk_number      varchar(20)                    // Dutch Chamber of Commerce
+  vat_number      varchar(30)
+  entity_type     varchar(20) [not null]         // INDIVIDUAL | ORGANIZATION
+  is_active       boolean     [not null, default: true]
+  created_at      timestamptz [not null]
+  updated_at      timestamptz [not null]
+}
+
+Table legal_entity_roles {
+  id                uuid       [pk]
+  legal_entity_id   uuid       [not null, ref: > legal_entities.id]
+  role              varchar(30) [not null]       // CUSTOMER | SUPPLIER | PARTNER | BROKER | RESELLER
+  effective_from    date        [not null]
+  effective_to      date
+  created_at        timestamptz [not null]
+}
+
+Table addresses {
+  id                      uuid         [pk]
+  street                  varchar(255) [not null]
+  house_number            varchar(20)  [not null]
+  house_number_addition   varchar(10)
+  postal_code             varchar(10)  [not null]
+  city                    varchar(100) [not null]
+  country_code            char(2)      [not null, default: 'NL']
+  created_at              timestamptz  [not null]
+}
+
+Table accounts {
+  id                  uuid        [pk]
+  legal_entity_id     uuid        [not null, ref: > legal_entities.id]
+  account_number      varchar(30) [unique, not null]
+  account_type        varchar(10) [not null]     // B2B | B2C
+  billing_address_id  uuid        [ref: > addresses.id]
+  legal_address_id    uuid        [ref: > addresses.id]
+  payment_method      varchar(20)                // DIRECT_DEBIT | BANK_TRANSFER
+  currency_code       char(3)     [not null, default: 'EUR']
+  is_active           boolean     [not null, default: true]
+  created_at          timestamptz [not null]
+  updated_at          timestamptz [not null]
+}
+
+// B2B hierarchy: Group → Subsidiary → Site (max depth 4)
+// Self-referential adjacency list
+Table b2b_nodes {
+  id              uuid        [pk]
+  account_id      uuid        [not null, ref: > accounts.id]
+  parent_id       uuid        [ref: > b2b_nodes.id]
+  node_type       varchar(20) [not null]         // GROUP | SUBSIDIARY | SITE
+  name            varchar(255) [not null]
+  cost_center_code varchar(50)                   // used at SITE level
+  is_billing_entity boolean   [not null, default: false]
+  depth           int         [not null]         // 1–4, enforced by app
+  effective_from  date        [not null]
+  effective_to    date
+  created_at      timestamptz [not null]
+}
+
+Table service_locations {
+  id              uuid        [pk]
+  account_id      uuid        [not null, ref: > accounts.id]
+  b2b_node_id     uuid        [ref: > b2b_nodes.id]
+  address_id      uuid        [not null, ref: > addresses.id]
+  location_name   varchar(255)
+  kvb_segment     boolean     [not null, default: false]  // Kleinverbruik
+  verblijfsfunctie boolean    [not null, default: false]  // Residential: Vermindering EB eligibility
+  is_active       boolean     [not null, default: true]
+  created_at      timestamptz [not null]
+  updated_at      timestamptz [not null]
+}
+
+// Persons — the real human behind a Keycloak account.
+// Anchor between Keycloak auth and all contact roles in the system.
+// keycloak_sub is immutable (Keycloak UUID); email is mutable (notification target only).
+// One person can be BILLING_CONTACT for Bedrijf A, SUBMITTER for Bedrijf B,
+// and also have a B2C home account — all under one login.
+Table persons {
+  id              uuid        [pk]
+  keycloak_sub    varchar(255) [unique, not null]  // Keycloak UUID from JWT.sub — immutable anchor
+  email           varchar(255) [unique, not null]  // mutable — auto-synced from JWT on login
+  first_name      varchar(100)
+  last_name       varchar(100)
+  phone           varchar(50)
+  created_at      timestamptz [not null]
+  updated_at      timestamptz [not null]
+
+  indexes {
+    (keycloak_sub) [name: "idx_persons_keycloak_sub"]
+    (email) [name: "idx_persons_email"]
+  }
+}
+
+// Contact persons linked to a legal entity — separates the human (persons) from the role.
+// person_id links to the real human; role defines what they can do in that legal entity context.
+// B2B dedup key: legal_entities.kvk_number (NOT email — employees may use personal email).
+// B2C dedup key: persons.email (NOT address — address is service_location, changes on moving house).
+// Keycloak account is created immediately when contact is added (role SUBMITTER / BILLING_CONTACT).
+// INVOICE_RECIPIENT does not get a Keycloak account — receives PDF via email only.
+Table contacts {
+  id                    uuid        [pk]
+  person_id             uuid        [not null, ref: > persons.id]  // the real human
+  legal_entity_id       uuid        [ref: > legal_entities.id]     // null before Sales Conversion
+  lead_id               uuid        [ref: > leads.id]
+  role                  varchar(30) [not null]
+  // SUBMITTER | AUTHORIZED_SIGNATORY | BILLING_CONTACT | INVOICE_RECIPIENT
+  has_signing_authority boolean     [not null, default: false]     // tekenbevoegdheid (NL)
+  is_primary            boolean     [not null, default: false]
+  is_active             boolean     [not null, default: true]
+  created_at            timestamptz [not null]
+  updated_at            timestamptz [not null]
+
+  indexes {
+    (person_id) [name: "idx_contacts_person"]
+    (legal_entity_id, role) [name: "idx_contacts_entity_role"]
+    (person_id, legal_entity_id) [unique, name: "uq_contacts_person_entity"]
+  }
+}
+
+
+// ============================================================
+// BOUNDED CONTEXT: CRM / Sales
+// ============================================================
+
+Table leads {
+  id                          uuid        [pk]
+  first_name                  varchar(100)
+  last_name                   varchar(100)
+  company_name                varchar(255)
+  kvk_number                  varchar(20)              // B2B: dedup against legal_entities.kvk_number
+  email                       varchar(255)             // contact person email — NOT company identity
+  phone                       varchar(50)
+  status                      varchar(20) [not null]   // RAW | QUALIFIED | CONVERTED | LOST
+  source                      varchar(50)
+  converted_legal_entity_id   uuid        [ref: > legal_entities.id]  // set on Sales Conversion
+  created_at                  timestamptz [not null]
+  updated_at                  timestamptz [not null]
+}
+
+Table quotation_requests {
+  id                          uuid        [pk]
+  lead_id                     uuid        [not null, ref: > leads.id]
+  service_address_id          uuid        [not null, ref: > addresses.id]
+  product_type                varchar(20) [not null]   // ELECTRICITY | GAS | BUNDLE
+  estimated_consumption_kwh   numeric(12,3)
+  estimated_consumption_m3    numeric(12,3)
+  desired_start_date          date
+  created_at                  timestamptz [not null]
+}
+
+Table offers {
+  id                    uuid        [pk]
+  lead_id               uuid        [not null, ref: > leads.id]
+  quotation_request_id  uuid        [ref: > quotation_requests.id]
+  supplier_id           uuid        [not null, ref: > legal_entities.id]
+  tariff_version_id     uuid        [not null, ref: > tariff_versions.id]
+  status                varchar(20) [not null]  // DRAFT | SENT | ACCEPTED | REJECTED | EXPIRED
+  annual_offer_amount   numeric(12,2) [not null]
+  monthly_voorschot     numeric(12,2) [not null]
+  valid_until           date        [not null]
+  created_at            timestamptz [not null]
+  updated_at            timestamptz [not null]
+}
+
+// One row per pricing component (matches pricing table structure in domain)
+Table offer_lines {
+  id                  uuid        [pk]
+  offer_id            uuid        [not null, ref: > offers.id]
+  tariff_line_type    varchar(60) [not null]
+  description_nl      varchar(255)
+  description_en      varchar(255)
+  volume_unit         varchar(20)              // KWH_YEAR | M3_YEAR | PER_YEAR | PER_DAY
+  rate                numeric(16,6)
+  quantity            numeric(16,3)
+  amount_excl_vat     numeric(12,2) [not null]
+  vat_rate            numeric(5,2)  [not null, default: 21.00]
+  amount_incl_vat     numeric(12,2) [not null]
+  sort_order          int
+}
+
+
+// ============================================================
+// BOUNDED CONTEXT: Contract Management
+// ============================================================
+
+Table contracts {
+  id                          uuid        [pk]
+  contract_number             varchar(30) [unique, not null]
+  account_id                  uuid        [not null, ref: > accounts.id]
+  supplier_id                 uuid        [not null, ref: > legal_entities.id]
+  offer_id                    uuid        [ref: > offers.id]
+  status                      varchar(20) [not null]
+  // DRAFT | OFFERED | ACCEPTED | ACTIVE | SUSPENDED | TERMINATED | EXPIRED
+  auto_renew_policy           varchar(20) [not null, default: 'NONE']
+  // NONE | SAME_TERMS | NEW_OFFER
+  notice_period_days          int         [not null, default: 30]
+  early_termination_fee_type  varchar(30)
+  // FIXED_AMOUNT | MONTHS_REMAINING | PERCENT_ESTIMATE
+  early_termination_fee_value numeric(12,2)
+  created_at                  timestamptz [not null]
+  updated_at                  timestamptz [not null]
+}
+
+// Immutable snapshot. Never mutate — always insert new version.
+// sepa_mandate_id: snapshot of which mandate (IBAN) was active at contract signing time.
+// Required for database-level audit of "which IBAN was used for this contract version".
+// IBAN is NOT stored in offers — offer is pricing only; IBAN is collected during onboarding.
+Table contract_versions {
+  id                    uuid        [pk]
+  contract_id           uuid        [not null, ref: > contracts.id]
+  version_number        int         [not null]
+  effective_from        date        [not null]
+  effective_to          date
+  monthly_voorschot     numeric(12,2) [not null]
+  annual_offer_amount   numeric(12,2) [not null]
+  tariff_version_id     uuid        [not null, ref: > tariff_versions.id]
+  sepa_mandate_id       uuid        [ref: > sepa_mandates.id]    // mandate active at signing; null if not yet collected
+  change_reason         varchar(255)
+  created_by            varchar(100)
+  created_at            timestamptz [not null]
+
+  indexes {
+    (contract_id, version_number) [unique, name: "uq_contract_version"]
+    (contract_id, effective_from) [name: "idx_contract_version_effective"]
+  }
+}
+
+// One row per product (ELECTRICITY/GAS) per service location per contract version
+Table contract_product_lines {
+  id                      uuid        [pk]
+  contract_version_id     uuid        [not null, ref: > contract_versions.id]
+  service_location_id     uuid        [not null, ref: > service_locations.id]
+  product_type            varchar(20) [not null]  // ELECTRICITY | GAS
+  estimated_annual_kwh    numeric(12,3)
+  estimated_annual_m3     numeric(12,3)
+  effective_from          date        [not null]
+  effective_to            date
+}
+
+// Links a contract product line to a physical EAN/connection point
+Table supply_point_assignments {
+  id                        uuid        [pk]
+  contract_product_line_id  uuid        [not null, ref: > contract_product_lines.id]
+  connection_point_id       uuid        [not null, ref: > connection_points.id]
+  effective_from            date        [not null]
+  effective_to              date
+  is_active                 boolean     [not null, default: true]
+}
+
+Table contract_terminations {
+  id                          uuid        [pk]
+  contract_id                 uuid        [not null, ref: > contracts.id]
+  notice_date                 date        [not null]
+  effective_termination_date  date        [not null]
+  reason                      varchar(50)
+  // CUSTOMER_REQUEST | NON_PAYMENT | SUPPLIER_SWITCH | EXPIRED
+  early_termination_fee_amount numeric(12,2)
+  created_at                  timestamptz [not null]
+}
+
+
+// ============================================================
+// BOUNDED CONTEXT: Metering
+// ============================================================
+
+// Logical supply point — does NOT change when physical meter is replaced
+Table connection_points {
+  id                  uuid        [pk]
+  ean                 varchar(18) [unique, not null]  // 18-digit Energy ID Code
+  service_location_id uuid        [ref: > service_locations.id]
+  utility_type        varchar(20) [not null]          // ELECTRICITY | GAS
+  captar_type         varchar(50)
+  // ELECTRICITY: 3x25A, 3x35A, 3x50A ...
+  // GAS: 0-500m3, 501-4000m3, 4001-40000m3
+  grid_operator       varchar(100)                    // Stedin | Liander | Enexis
+  is_active           boolean     [not null, default: true]
+  created_at          timestamptz [not null]
+  updated_at          timestamptz [not null]
+}
+
+// Physical metering device — multiple over time per connection point
+Table meters {
+  id                  uuid        [pk]
+  connection_point_id uuid        [not null, ref: > connection_points.id]
+  serial_number       varchar(50) [not null]
+  meter_type          varchar(20) [not null]  // SMART | CONVENTIONAL
+  installed_at        date        [not null]
+  removed_at          date
+  is_active           boolean     [not null, default: true]
+  created_at          timestamptz [not null]
+}
+
+// Point-in-time meter reading — initial, final, periodic, corrected
+Table meter_readings {
+  id                  uuid        [pk]
+  meter_id            uuid        [not null, ref: > meters.id]
+  connection_point_id uuid        [not null, ref: > connection_points.id]
+  reading_value       numeric(14,3) [not null]
+  unit                varchar(10) [not null]   // KWH | M3
+  reading_date        timestamptz [not null]
+  reading_type        varchar(20) [not null]   // ACTUAL | ESTIMATED | CORRECTED
+  reading_source      varchar(30) [not null]   // SMART_METER | MANUAL | EDSN | SYSTEM
+  reading_category    varchar(20)              // INITIAL | FINAL | PERIODIC | REPLACEMENT
+  replaces_reading_id uuid        [ref: > meter_readings.id]
+  created_at          timestamptz [not null]
+
+  indexes {
+    (connection_point_id, reading_date) [name: "idx_reading_ean_date"]
+  }
+}
+
+// Metadata / period summaries only — raw hourly data lives in TimescaleDB/InfluxDB
+Table consumption_period_summaries {
+  id                  uuid        [pk]
+  connection_point_id uuid        [not null, ref: > connection_points.id]
+  contract_id         uuid        [ref: > contracts.id]
+  period_start        date        [not null]
+  period_end          date        [not null]
+  gross_consumption   numeric(14,3)
+  net_production      numeric(14,3)   // solar/Saldering
+  net_consumption     numeric(14,3)   // basis for Energiebelasting
+  unit                varchar(10) [not null]  // KWH | M3
+  is_estimated        boolean     [not null, default: false]
+  start_reading_id    uuid        [ref: > meter_readings.id]
+  end_reading_id      uuid        [ref: > meter_readings.id]
+  created_at          timestamptz [not null]
+  updated_at          timestamptz [not null]
+
+  indexes {
+    (connection_point_id, period_start, period_end) [name: "idx_consumption_ean_period"]
+  }
+}
+
+
+// ============================================================
+// BOUNDED CONTEXT: Pricing Engine
+// ============================================================
+
+// Tariff set per supplier + product. NULL legal_entity_id = standard rate.
+// Non-null legal_entity_id = negotiated B2B tariff override.
+Table tariffs {
+  id                  uuid        [pk]
+  supplier_id         uuid        [not null, ref: > legal_entities.id]
+  tariff_code         varchar(50) [not null]
+  product_type        varchar(20) [not null]  // ELECTRICITY | GAS
+  tariff_name         varchar(255) [not null]
+  is_negotiated       boolean     [not null, default: false]
+  legal_entity_id     uuid        [ref: > legal_entities.id]  // NULL = standard
+  is_active           boolean     [not null, default: true]
+  created_at          timestamptz [not null]
+}
+
+// Immutable snapshot — never update, always insert new version
+Table tariff_versions {
+  id              uuid        [pk]
+  tariff_id       uuid        [not null, ref: > tariffs.id]
+  version_number  int         [not null]
+  effective_from  date        [not null]
+  effective_to    date
+  created_by      varchar(100)
+  created_at      timestamptz [not null]
+
+  indexes {
+    (tariff_id, effective_from) [name: "idx_tariff_version_effective"]
+    (tariff_id, version_number) [unique, name: "uq_tariff_version"]
+  }
+}
+
+// One row per pricing component per tariff version
+Table tariff_lines {
+  id                  uuid        [pk]
+  tariff_version_id   uuid        [not null, ref: > tariff_versions.id]
+  line_type           varchar(60) [not null]
+  // FIXED_SERVICE_FEE
+  // WHOLESALE_CONSUMPTION | TOPUP_FEE_CONSUMPTION
+  // WHOLESALE_PRODUCTION  | TOPUP_FEE_PRODUCTION
+  // ENERGIEBELASTING_TIER_1 .. TIER_4
+  // VERMINDERING_EB
+  // CAPTAR_DAILY
+  // BTW
+  description_nl      varchar(255)
+  description_en      varchar(255)
+  rate_type           varchar(20) [not null]
+  // FIXED | VARIABLE_PER_UNIT | TIERED | CAPTAR_DAILY
+  rate                numeric(16,6)
+  unit                varchar(20)       // KWH | M3 | PER_YEAR | PER_DAY
+  vat_rate            numeric(5,2)      [not null, default: 21.00]
+  sort_order          int
+}
+
+// Consumption-tiered Energiebelasting rates
+// Rate decreases as annual consumption increases (government-set, versioned annually)
+Table energiebelasting_tiers {
+  id                  uuid        [pk]
+  tariff_version_id   uuid        [not null, ref: > tariff_versions.id]
+  product_type        varchar(20) [not null]   // ELECTRICITY | GAS
+  tier_number         int         [not null]
+  from_units          numeric(14,3) [not null]
+  to_units            numeric(14,3)            // NULL = unbounded
+  rate_per_unit       numeric(16,6) [not null]
+  unit                varchar(10) [not null]   // KWH | M3
+
+  indexes {
+    (tariff_version_id, product_type, tier_number) [unique, name: "uq_eb_tier"]
+  }
+}
+
+// Captar (Capaciteitstarief) — grid fee per day by connection type
+Table captar_rates {
+  id                  uuid        [pk]
+  tariff_version_id   uuid        [not null, ref: > tariff_versions.id]
+  product_type        varchar(20) [not null]   // ELECTRICITY | GAS
+  captar_type         varchar(50) [not null]   // e.g. '3x25A' or '501-4000m3'
+  rate_per_day        numeric(16,6) [not null]
+  description         varchar(100)
+
+  indexes {
+    (tariff_version_id, product_type, captar_type) [unique, name: "uq_captar_rate"]
+  }
+}
+
+
+// ============================================================
+// BOUNDED CONTEXT: Billing
+// ============================================================
+
+// Immutable after issuance. Corrections go through credit_debit_notes.
+Table invoices {
+  id                    uuid        [pk]
+  invoice_number        varchar(30) [unique, not null]
+  account_id            uuid        [not null, ref: > accounts.id]
+  contract_id           uuid        [not null, ref: > contracts.id]
+  invoice_type          varchar(20) [not null]   // VOORSCHOT | EINDAFREKENING
+  status                varchar(20) [not null]
+  // DRAFT | ISSUED | PAID | PARTIALLY_PAID | OVERDUE | VOIDED
+  billing_period_start  date        [not null]
+  billing_period_end    date        [not null]
+  invoice_date          date        [not null]
+  due_date              date        [not null]
+  amount_excl_vat       numeric(12,2) [not null]
+  vat_amount            numeric(12,2) [not null]
+  amount_incl_vat       numeric(12,2) [not null]
+  currency_code         char(3)     [not null, default: 'EUR']
+  is_estimated          boolean     [not null, default: false]
+  created_at            timestamptz [not null]
+
+  indexes {
+    (account_id, billing_period_start) [name: "idx_invoice_account_period"]
+  }
+}
+
+// Line-item detail for invoice — one row per tariff component per EAN
+Table invoice_line_items {
+  id                  uuid        [pk]
+  invoice_id          uuid        [not null, ref: > invoices.id]
+  connection_point_id uuid        [ref: > connection_points.id]
+  tariff_line_type    varchar(60) [not null]
+  description_nl      varchar(255)
+  description_en      varchar(255)
+  volume_quantity     numeric(16,3)
+  volume_unit         varchar(20)
+  rate                numeric(16,6)
+  tariff_version_id   uuid        [ref: > tariff_versions.id]  // versioned snapshot
+  amount_excl_vat     numeric(12,2) [not null]
+  vat_rate            numeric(5,2)  [not null, default: 21.00]
+  vat_amount          numeric(12,2) [not null]
+  amount_incl_vat     numeric(12,2) [not null]
+  sort_order          int
+}
+
+// Links an Eindafrekening to all its Voorschot invoices in the same billing year
+Table invoice_voorschot_links {
+  eindafrekening_invoice_id   uuid [not null, ref: > invoices.id]
+  voorschot_invoice_id        uuid [not null, ref: > invoices.id]
+
+  indexes {
+    (eindafrekening_invoice_id, voorschot_invoice_id) [pk]
+  }
+}
+
+// Immutable correction documents — never modify the original invoice
+Table credit_debit_notes {
+  id                    uuid        [pk]
+  note_number           varchar(30) [unique, not null]
+  note_type             varchar(10) [not null]   // CREDIT | DEBIT
+  original_invoice_id   uuid        [not null, ref: > invoices.id]
+  account_id            uuid        [not null, ref: > accounts.id]
+  correction_type       varchar(40) [not null]
+  // METER_READING_CORRECTION | PRICING_CORRECTION | BILLING_ERROR | RETROACTIVE_TARIFF
+  reason                varchar(255)
+  amount_excl_vat       numeric(12,2) [not null]
+  vat_amount            numeric(12,2) [not null]
+  amount_incl_vat       numeric(12,2) [not null]
+  currency_code         char(3)     [not null, default: 'EUR']
+  actual_reading_id     uuid        [ref: > meter_readings.id]
+  issued_date           date        [not null]
+  created_at            timestamptz [not null]
+}
+
+
+// ============================================================
+// BOUNDED CONTEXT: Supplier Management
+// ============================================================
+
+Table supplier_licenses {
+  id              uuid        [pk]
+  supplier_id     uuid        [not null, ref: > legal_entities.id]
+  license_number  varchar(50) [not null]
+  license_type    varchar(20) [not null]  // ELECTRICITY | GAS | BOTH
+  valid_from      date        [not null]
+  valid_to        date
+  issued_by       varchar(50) [not null, default: 'ACM']
+  is_active       boolean     [not null, default: true]
+  created_at      timestamptz [not null]
+}
+
+// Switch flow: Customer requests → EDSN confirm → Effective date → Final reading
+Table supplier_switch_requests {
+  id                      uuid        [pk]
+  ean                     varchar(18) [not null]
+  connection_point_id     uuid        [not null, ref: > connection_points.id]
+  incumbent_supplier_id   uuid        [not null, ref: > legal_entities.id]
+  new_supplier_id         uuid        [not null, ref: > legal_entities.id]
+  new_contract_id         uuid        [ref: > contracts.id]
+  status                  varchar(20) [not null]
+  // PENDING | CONFIRMED | REJECTED | COMPLETED | CANCELLED
+  requested_date          date        [not null]
+  effective_switch_date   date
+  final_reading_id        uuid        [ref: > meter_readings.id]
+  edsn_reference          varchar(50)
+  rejection_reason        varchar(255)
+  created_at              timestamptz [not null]
+  updated_at              timestamptz [not null]
+}
+
+
+// ============================================================
+// BOUNDED CONTEXT: Payment
+// ============================================================
+
+Table sepa_mandates {
+  id                    uuid        [pk]
+  account_id            uuid        [not null, ref: > accounts.id]
+  mandate_reference     varchar(50) [unique, not null]
+  iban                  varchar(34) [not null]
+  account_holder_name   varchar(255) [not null]
+  signed_date           date        [not null]
+  valid_from            date        [not null]
+  revoked_at            timestamptz
+  is_active             boolean     [not null, default: true]
+  created_at            timestamptz [not null]
+}
+
+Table payment_runs {
+  id              uuid        [pk]
+  run_date        date        [not null]
+  status          varchar(20) [not null]  // PENDING | PROCESSING | COMPLETED | FAILED
+  total_amount    numeric(14,2)
+  currency_code   char(3)     [not null, default: 'EUR']
+  created_at      timestamptz [not null]
+  completed_at    timestamptz
+}
+
+Table payments {
+  id                uuid        [pk]
+  payment_run_id    uuid        [ref: > payment_runs.id]
+  account_id        uuid        [not null, ref: > accounts.id]
+  sepa_mandate_id   uuid        [ref: > sepa_mandates.id]
+  payment_method    varchar(20) [not null]   // DIRECT_DEBIT | BANK_TRANSFER
+  amount            numeric(12,2) [not null]
+  currency_code     char(3)     [not null, default: 'EUR']
+  status            varchar(20) [not null]
+  // PENDING | PROCESSING | COMPLETED | FAILED | REFUNDED
+  payment_date      date
+  bank_reference    varchar(100)
+  failure_reason    varchar(255)
+  retry_count       int         [not null, default: 0]
+  created_at        timestamptz [not null]
+  updated_at        timestamptz [not null]
+}
+
+// One payment can cover multiple invoices (partial/consolidated)
+Table payment_allocations {
+  id                uuid        [pk]
+  payment_id        uuid        [not null, ref: > payments.id]
+  invoice_id        uuid        [not null, ref: > invoices.id]
+  allocated_amount  numeric(12,2) [not null]
+  created_at        timestamptz [not null]
+
+  indexes {
+    (payment_id, invoice_id) [unique, name: "uq_payment_allocation"]
+  }
+}
