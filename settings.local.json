@@ -37,7 +37,11 @@
       "PowerShell(Get-NetTCPConnection *)",
       "PowerShell(netstat *)",
       "Bash(curl *)",
-      "Skill(code-review)"
+      "Skill(code-review)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }
