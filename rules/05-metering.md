@@ -110,6 +110,53 @@ Cần hiểu:
 
 ---
 
+## 2.14 Meter Registers — T1/T2/T3/T4 (DSMR)
+
+Đồng hồ điện Hà Lan theo chuẩn **DSMR (Dutch Smart Meter Requirements)** có tối đa 4 register:
+
+| Register | Chiều | Tariff | OBIS code | Mô tả |
+|----------|-------|--------|-----------|-------|
+| **T1** | Consumption | Normaal/Piek | `1-0:1.8.1` | Điện tiêu thụ giờ cao điểm |
+| **T2** | Consumption | Laag/Dal | `1-0:1.8.2` | Điện tiêu thụ giờ thấp điểm |
+| **T3** | Production | Normaal/Piek | `1-0:2.8.1` | Điện trả lưới (solar) giờ cao điểm |
+| **T4** | Production | Laag/Dal | `1-0:2.8.2` | Điện trả lưới (solar) giờ thấp điểm |
+
+**Lưu ý:**
+- Đồng hồ enkel tarief (1 giá): chỉ có **T1** (normaal), không có T2.
+- T3/T4 chỉ tồn tại khi customer có solar panel và đăng ký saldering.
+- Gas meter không có T1–T4 — chỉ có 1 register tổng (m³).
+
+### Mapping sang EDSN API
+
+EDSN **không dùng tên T1–T4** — encode qua 2 field kết hợp:
+
+```
+tariffType (L / N / T)  ×  meteringDirection (consumption / production)
+```
+
+| T | `tariffType` | `meteringDirection` |
+|---|-------------|---------------------|
+| T1 | `N` (Normaal) | consumption |
+| T2 | `L` (Laag) | consumption |
+| T3 | `N` (Normaal) | production |
+| T4 | `L` (Laag) | production |
+| — | `T` (Total) | consumption | Enkel tarief hoặc total aggregate |
+
+**`meterReadingExchange`** (conventional meter):
+- Trả về list `Register[]`, mỗi register có `tariffType` + `meteringDirection` + `reading`.
+- Parse `tariffType` × `meteringDirection` → map ra T1/T2/T3/T4 khi lưu vào DB.
+
+**`p4` / `p4Result`** (smart meter):
+- Register có field `id` chứa OBIS code trực tiếp (`1-0:1.8.1` v.v.).
+- Map 1:1 với T1–T4 — không cần suy luận qua tariffType.
+
+**Implication cho billing:**
+- Energiebelasting tính trên **net consumption** = (T1 + T2) − (T3 + T4).
+- Khi lưu consumption record vào time-series DB, phải lưu theo từng register riêng — không aggregate sớm.
+- Query billing cần sum T1+T2 và T3+T4 riêng trước khi tính tiered EB.
+
+---
+
 ## 3.4 Meter Replacement
 
 Meter có thể:
@@ -193,3 +240,11 @@ Consumption history cần continuity:
 | **EDSN**                             | Energy Data Services Netherlands — tổ chức trung gian quản lý trao đổi metering data giữa các supplier và grid operator tại Hà Lan. Supplier nhận meter data qua EDSN — không tự collect.                      |
 | **P4 Protocol**                      | Giao thức EDI dùng giữa grid operator và EDSN để trao đổi metering data. Hệ thống cần integration layer để parse và import.                                                                                    |
 | **Retroactive Correction**           | Khi actual reading đến sau khi đã billing với estimated → hệ thống recalculate difference và generate Credit Note hoặc Debit Note. Invoice gốc giữ nguyên.                                                     |
+| **DSMR (Dutch Smart Meter Requirements)** | Chuẩn kỹ thuật đồng hồ điện Hà Lan. Định nghĩa cấu trúc P1 telegram và các OBIS code cho từng register. Phiên bản hiện tại: DSMR 5.0.                                                                    |
+| **Tariff Register**                  | Một register vật lý trong đồng hồ điện, ghi nhận consumption hoặc production theo tariff zone. Một đồng hồ dual-tariff có tối đa 4 registers: T1, T2, T3, T4.                                                  |
+| **T1 (Normaal consumption)**         | Register ghi điện tiêu thụ giờ cao điểm (piek/normaal). OBIS: `1-0:1.8.1`. EDSN: `tariffType=N`, `meteringDirection=consumption`.                                                                              |
+| **T2 (Laag consumption)**            | Register ghi điện tiêu thụ giờ thấp điểm (dal/laag). OBIS: `1-0:1.8.2`. EDSN: `tariffType=L`, `meteringDirection=consumption`.                                                                                |
+| **T3 (Normaal production)**          | Register ghi điện trả lưới giờ cao điểm (solar teruglevering piek). OBIS: `1-0:2.8.1`. EDSN: `tariffType=N`, `meteringDirection=production`. Chỉ có khi customer có solar + saldering.                         |
+| **T4 (Laag production)**             | Register ghi điện trả lưới giờ thấp điểm (solar teruglevering dal). OBIS: `1-0:2.8.2`. EDSN: `tariffType=L`, `meteringDirection=production`. Chỉ có khi customer có solar + saldering.                         |
+| **Enkel Tarief**                     | Đồng hồ 1 giá — chỉ có 1 register tổng (`tariffType=T`). Không phân biệt piek/dal. Thường gặp ở B2C cũ hoặc small business.                                                                                   |
+| **OBIS Code**                        | Mã định danh chuẩn quốc tế cho từng loại measurement trên đồng hồ (Object Identification System). P4 API trả về OBIS code trực tiếp trong field `id` của register.                                             |

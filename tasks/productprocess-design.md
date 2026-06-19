@@ -191,12 +191,78 @@ catch (EdsnBusinessException e) {
 
 ---
 
-### 3.4 processGainResult() dùng hardcoded data
+### 3.4 processMoveInAcceptJob không có batch limit — fetch toàn bộ records
+
+`findByProcessStepStatus()` trong `ProductProcessRepositoryCustom` không có `LIMIT` hay `Pageable`.
+Khi job chạy, nó fetch **tất cả** records `MOVE_IN + ACCEPTED + SUCCESS` vào memory cùng lúc — không giới hạn.
+
+**Yêu cầu:** Mỗi lần job chạy chỉ xử lý tối đa **15 records** để giảm tải request sang EDSN.
+Job chạy lặp lại định kỳ trong khung giờ cuối ngày — nếu có 45 records thì tự nhiên drain qua 3 lần chạy cách nhau theo interval:
+
+```
+[TBD: HH:mm] → job chạy → pick 15 → gửi EDSN
+[TBD: HH:mm] → job chạy → pick 15 → gửi EDSN
+[TBD: HH:mm] → job chạy → pick 15 → gửi EDSN
+[TBD: HH:mm] → job chạy → 0 records eligible → no-op
+```
+
+Cơ chế hoạt động tự nhiên: sau mỗi lần gửi, records chuyển sang `SENT` → không còn match `ACCEPTED+SUCCESS` → lần chạy tiếp theo pick 15 records tiếp theo.
+
+**Hai trigger gửi moveIn:**
+
+| Trigger | Thời điểm | Batch limit |
+|---------|-----------|-------------|
+| Manual (`manualMoveIn`) | Ngay lập tức khi agent click | Không áp dụng — gửi 1 record |
+| Auto job (`processMoveInAcceptJob`) | Theo cron, cuối ngày | 15 records/lần |
+
+**Cấu hình cần xác định (placeholder):**
+
+| Tham số | Giá trị | Ghi chú |
+|---------|---------|---------|
+| `BATCH_SIZE` | `15` | Số records tối đa mỗi lần chạy |
+| Job window start | `[TBD]` | Giờ bắt đầu chạy job (ví dụ: `20:00`) |
+| Job window end | `[TBD]` | Giờ kết thúc (ví dụ: `23:00`) |
+| Interval giữa các lần | `[TBD]` | Cron expression (ví dụ: mỗi 15 phút) |
+
+**Fix:**
+
+1. Thêm `Pageable` vào `findByProcessStepStatus()`:
+
+```java
+List<ProductProcess> findByProcessStepStatus(
+    @Param("processTypes") List<ProcessType> processTypes,
+    @Param("stepType") StepType stepType,
+    @Param("stepStatuses") List<StepStatus> stepStatuses,
+    Pageable pageable
+);
+```
+
+2. Thêm constant và truyền `PageRequest` vào `processMoveInAcceptJob()` và `processMoveInSendJob()`:
+
+```java
+static int BATCH_SIZE = 15;
+
+// trong processMoveInAcceptJob()
+productProcessRepository.findByProcessStepStatus(
+    List.of(ProcessType.MOVE_IN),
+    StepType.ACCEPTED,
+    List.of(StepStatus.SUCCESS),
+    PageRequest.of(0, BATCH_SIZE)
+);
+```
+
+3. Cập nhật cron expression của `ProcessMoveInAcceptJob` chạy trong window cuối ngày với interval [TBD].
+
+**Lưu ý:** `SwitchProductService` cũng dùng `findByProcessStepStatus` → cần truyền `Pageable` tương ứng khi sửa.
+
+---
+
+### 3.5 processGainResult() dùng hardcoded data
 
 `getGainResultResponseEnvelopePortaalContent()` trả về JSON hardcoded thay vì gọi
 `edsnService.gainResult()` thật. Tương tự `callMoveInApi()` dùng `buildMoveInResponse()`.
 
-### 3.5 Thiếu validation EAN trước khi tạo process
+### 3.6 Thiếu validation EAN trước khi tạo process
 
 `persistCreateStep()` assume EAN hợp lệ và không có incumbent.
 Nếu gửi `moveIn` cho EAN đang có supplier → EDSN reject → chỉ biết khi poll rejectionResult.
@@ -207,7 +273,7 @@ SCMPInfo scmp = edsnService.getSCMPInformation(eanId);
 ProcessType type = scmp.hasCurrentSupplier() ? SWITCH : MOVE_IN;
 ```
 
-### 3.6 Post-GAINED chưa làm gì
+### 3.7 Post-GAINED chưa làm gì
 
 Sau khi `GAINED`, không:
 - Set `product_process.actualStartDate` từ `mutationDate` trong gain response
@@ -275,19 +341,19 @@ entity ProductProcess {
 
 ## 5. Job architecture cần implement
 
-| Job | Xử lý | Logic |
-|-----|-------|-------|
-| `ProcessMoveInAcceptJob` | Đã có (disabled) | Pick `MOVE_IN + ACCEPTED+SUCCESS` → gọi `moveIn` → `SENT` |
-| `ProcessSwitchAcceptJob` | Đã có (disabled) | Pick `SWITCH + ACCEPTED+SUCCESS` → gọi `changeOfSupplier` → `SENT` |
-| `ProcessMoveInSendJob` | Đã có (disabled) | Retry `MOVE_IN + SENT+PENDING/RETRY` |
-| `ProcessSwitchSendJob` | Đã có (disabled) | Retry `SWITCH + SENT+PENDING/RETRY` |
-| `PollGainResultJob` | Thiếu job, có partial code | `gainResult()` → match `transactionId` → `GAINED` + set `actualStartDate` + `product.ACTIVE` |
-| `PollLossResultJob` | **Chưa có** | `lossResult()` → match `transactionId` hoặc EAN → `LOST` + set `actualEndDate` + `product.INACTIVE` |
-| `PollRejectionResultJob` | **Chưa có** | `rejectionResult()` → match `transactionId` → `REJECTED` |
-| `ExpireProcessJob` | Đã có (disabled) | `CREATED+SUCCESS` quá `offerExpirationDate` → `CANCEL` |
-| `TimeoutSentJob` | **Chưa có** | `SENT+SUCCESS` quá `sentAt + threshold` → alert / escalate |
-| `MoveOutAcceptJob` | **Chưa có** | Pick `MOVE_OUT + ACCEPTED+SUCCESS` → gọi `moveOut` → `SENT` |
-| `EndOfSupplyAcceptJob` | **Chưa có** | Pick `END_OF_SUPPLY + ACCEPTED+SUCCESS` → gọi `endOfSupply` → `SENT` |
+| Job | Xử lý | Schedule | Logic |
+|-----|-------|----------|-------|
+| `ProcessMoveInAcceptJob` | Đã có (disabled) | Cuối ngày, mỗi `[TBD]` phút, trong khung `[TBD]`–`[TBD]` | Pick `MOVE_IN + ACCEPTED+SUCCESS` (limit 15) → gọi `moveIn` → `SENT` |
+| `ProcessSwitchAcceptJob` | Đã có (disabled) | `[TBD]` | Pick `SWITCH + ACCEPTED+SUCCESS` (limit 15) → gọi `changeOfSupplier` → `SENT` |
+| `ProcessMoveInSendJob` | Đã có (disabled) | `[TBD]` | Retry `MOVE_IN + SENT+PENDING/RETRY` (limit 15) |
+| `ProcessSwitchSendJob` | Đã có (disabled) | `[TBD]` | Retry `SWITCH + SENT+PENDING/RETRY` (limit 15) |
+| `PollGainResultJob` | Thiếu job, có partial code | `[TBD]` | `gainResult()` → match `transactionId` → `GAINED` + set `actualStartDate` + `product.ACTIVE` |
+| `PollLossResultJob` | **Chưa có** | `[TBD]` | `lossResult()` → match `transactionId` hoặc EAN → `LOST` + set `actualEndDate` + `product.INACTIVE` |
+| `PollRejectionResultJob` | **Chưa có** | `[TBD]` | `rejectionResult()` → match `transactionId` → `REJECTED` |
+| `ExpireProcessJob` | Đã có (disabled) | `[TBD]` | `CREATED+SUCCESS` quá `offerExpirationDate` → `CANCEL` |
+| `TimeoutSentJob` | **Chưa có** | `[TBD]` | `SENT+SUCCESS` quá `sentAt + threshold` → alert / escalate |
+| `MoveOutAcceptJob` | **Chưa có** | `[TBD]` | Pick `MOVE_OUT + ACCEPTED+SUCCESS` → gọi `moveOut` → `SENT` |
+| `EndOfSupplyAcceptJob` | **Chưa có** | `[TBD]` | Pick `END_OF_SUPPLY + ACCEPTED+SUCCESS` → gọi `endOfSupply` → `SENT` |
 
 ---
 
@@ -508,6 +574,11 @@ meter.*                = toàn bộ fields cập nhật từ getMeteringPoint / 
 
 ### Phase 1 — Fix & enable flows hiện có
 
+- [ ] Xác nhận job window start/end và interval với team → điền vào `[TBD]` trong section 3.4
+- [ ] Thêm `Pageable` vào `findByProcessStepStatus()` trong `ProductProcessRepositoryCustom`
+- [ ] Thêm `BATCH_SIZE = 15` constant, truyền `PageRequest.of(0, BATCH_SIZE)` vào `processMoveInAcceptJob()` và `processMoveInSendJob()`
+- [ ] Cập nhật cron expression của `ProcessMoveInAcceptJob` theo window + interval đã xác nhận
+- [ ] Cập nhật `SwitchProductService` truyền `Pageable` tương ứng khi gọi `findByProcessStepStatus()`
 - [ ] Fix `transactionId`: generate UUID trước `persistSendStep()`, không sau
 - [ ] Thêm `sentAt` field vào `ProductProcess` entity + JDL + Liquibase migration
 - [ ] Thêm `actualEndDate` field vào `ProductProcess` entity + JDL + Liquibase migration
