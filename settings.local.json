@@ -41,7 +41,12 @@
       "Bash(git checkout *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Skill(artifact-design)",
+      "Skill(run)",
+      "PowerShell(Start-Process -FilePath \"C:\\\\crawlerenergie\\\\project\\\\crawler-backend\\\\mvnw.cmd\" -ArgumentList \"spring-boot:run\", \"-Dspring-boot.run.profiles=dev\" -WorkingDirectory \"C:\\\\crawlerenergie\\\\project\\\\crawler-backend\" -RedirectStandardOutput \"C:\\\\Users\\\\HP\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\app-stdout.log\" -RedirectStandardError \"C:\\\\Users\\\\HP\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\app-stderr.log\" -NoNewWindow; Write-Host \"Started\")",
+      "Read(//c/Users/HP/AppData/Local/Temp/claude/**)",
+      "PowerShell(& \"C:\\\\Program Files\\\\PostgreSQL\\\\16\\\\bin\\\\psql.exe\" -U CrawlerBackend -d CrawlerBackend -c \"SELECT extname, extversion FROM pg_extension WHERE extname = 'timescaledb';\" 2>&1)"
     ]
   }
 }
