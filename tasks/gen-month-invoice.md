@@ -192,3 +192,86 @@ First Day Of Next Month -> End Of Next Month
 ```
 
 This ensures there is no missing billing period before the next regular billing cycle.
+
+---
+
+# Implementation Rules
+
+## Core: Shared Generation Logic
+
+All invoice generation APIs use a single shared method with the same rules:
+
+```
+generateMissingMonthlyInvoicesUntil(agreement, targetEnd, jobDate)
+```
+
+### Starting Point
+
+```
+if lastMonthInvoice exists:
+    current = lastMonthInvoice.endDate + 1 day   ← incremental
+
+else:
+    current = agreement.effectiveDate             ← safety net / first invoice
+    log WARN: no invoice found, starting from effectiveDate
+```
+
+### Loop Until targetEnd
+
+```
+while current <= targetEnd:
+    periodEnd = lastDayOfMonth(current)
+
+    if jobDate > periodEnd:
+        log WARN: retroactive invoice            ← invoice issued after period ended
+
+    if no invoice exists covering current:
+        if current.day == 1:
+            createMonthlyInvoice                 ← full month, startDate = 1st
+        else:
+            createCustomMonthlyInvoice           ← partial month, startDate = current (exact effectiveDate)
+
+    current = firstDayOfMonth(current + 1 month)
+```
+
+### Idempotency
+
+Check via `findByGivenDateAndAgreementId(current, agreementId, MONTH)`:
+
+```
+current BETWEEN invoice.startDate AND invoice.endDate → skip (already exists)
+```
+
+---
+
+## API Ceiling per Use Case
+
+| API | targetEnd | jobDate |
+| --- | --------- | ------- |
+| `generateMonthInvoice` (Scenario 1) | endOfMonth(effectiveDate) | today |
+| `generateMonthInvoice` (Scenario 2) | endOfNextMonth(effectiveDate) | today |
+| `invoiceGenerate` (year) | min(yearEnd, today) | today |
+| `generateAllInvoices` | invoiceDate (from request) | invoiceDate |
+| `runMonthlyBillingJob` | endOfNextMonth(runDate) | runDate |
+
+---
+
+## Purpose of Each API
+
+| API | Purpose |
+| --- | ------- |
+| `generateMonthInvoice` | Generate initial invoice(s) at supply start (onboarding) |
+| `invoiceGenerate` | Generate all missing invoices for a specific customer and year |
+| `generateAllInvoices` | Gap fill — generate ALL missing invoices up to a given date |
+| `runMonthlyBillingJob` | Regular 15th job — generate next month's invoice only |
+
+---
+
+## dueDate Rule (Dutch market)
+
+```
+dueDate = invoiceDate + 14 days
+```
+
+`invoiceDate` is always the date the invoice was generated (jobDate / today), not the period start date.
+Compliant with Dutch *betaaltermijn* rules (ACM).
