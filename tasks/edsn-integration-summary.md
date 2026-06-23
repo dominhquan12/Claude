@@ -1,6 +1,6 @@
 # EDSN Integration — Summary
 
-> Source: `edsn-api.docx` (kwalificatie document, geldig vanaf 12-02-2025)
+> Source: `edsn-api.docx` (qualification document, valid from 12-02-2025)
 > Analysed: 2026-06-20
 
 ---
@@ -22,7 +22,7 @@ EDSN Portaal    (portaal-act.edsn.nl / portaal-opt.edsn.nl)
 
 **Protocol**: SOAP/JAX-WS — classes generated from WSDL at build time into `nl.crawler.ws.client.generated.*`
 
-**Authentication**: mTLS met PKCS12 certificate + WS-Security (WSS4JSecurityHandler)
+**Authentication**: mTLS with PKCS12 certificate + WS-Security (WSS4JSecurityHandler)
 
 ---
 
@@ -43,74 +43,76 @@ SOAP header (auto-filled per call): `messageID` (random UUID) + `creationTimesta
 
 ## 3. Environments & URLs
 
-| Profile | `edsn.base-url` | Omgeving |
+| Profile | `edsn.base-url` | Environment |
 |---------|----------------|---------|
 | `dev` / `testdev` | `https://portaal-act.edsn.nl` | ACT (acceptance) |
-| `prod` | `https://portaal-opt.edsn.nl` | OPT (test/kwalificatie) |
+| `prod` | `https://portaal-opt.edsn.nl` | OPT (test/qualification) |
 | P4 (both) | `https://pp4-test.edsn.nl/P4BatchVerzoekMeterstand/P4Port` | Test |
 
 Keystore: `keystore-crawler.p12` (in classpath resources), password in config.
 
 ---
 
-## 4. Endpoints — volledig overzicht
+## 4. Endpoints — complete overview
 
-Alle paths zijn relatief t.o.v. `edsn.base-url`.
+All paths are relative to `edsn.base-url`.
 
-### Synchrone operaties (`/b2b/synchroon/`)
+### Synchronous operations (`/b2b/synchroon/`)
 
-| Operation | Config key | Beschrijving |
+| Operation | Config key | Description |
 |-----------|-----------|-------------|
-| MoveIn | `move-in-url` | Nieuwe klant op een aansluiting |
+| MoveIn | `move-in-url` | New customer on a connection |
 | MoveInBatch | `move-in-batch-url` | Batch MoveIn |
-| MoveOut | `move-out-url` | Klant verlaat aansluiting |
+| MoveOut | `move-out-url` | Customer leaves connection |
 | MoveOutBatch | `move-out-batch-url` | Batch MoveOut |
-| ChangeOfSupplier | `change-of-supplier-url` | Leverancierswisseling |
-| ChangeOfSupplierBatch | `change-of-supplier-batch-url` | Batch leverancierswisseling |
-| EndOfSupply | `end-of-supply-url` | Einde levering |
-| EndOfSupplyBatch | `end-of-supply-batch-url` | Batch einde levering |
-| ChangeOfPV | `change-of-pv-url` | Wijziging programmaverantwoordelijke |
+| ChangeOfSupplier | `change-of-supplier-url` | Supplier switch |
+| ChangeOfSupplierBatch | `change-of-supplier-batch-url` | Batch supplier switch |
+| EndOfSupply | `end-of-supply-url` | End of supply |
+| EndOfSupplyBatch | `end-of-supply-batch-url` | Batch end of supply |
+| ChangeOfPV | `change-of-pv-url` | Change of balance responsible party |
 | ChangeOfPVBatch | `change-of-pv-batch-url` | Batch ChangeOfPV |
-| NameChange | `name-change-url` | Naamswijziging op aansluiting |
-| MasterData | `master-data-url` | Opvragen masterdata van EAN |
-| MasterDataBatch | `master-data-batch-url` | Batch masterdata |
-| MasterDataUpdate | `master-data-update-url` | Ontvangen masterdata updates (pull) |
-| GetMeteringPointMP | `get-metering-point-url` | Volledige meteringpoint info per EAN |
-| SearchMeteringPointsMP | `search-metering-points-url` | Zoek meteringpoints |
-| GetSCMPInformation | `get-scmp-information-url` | SCMP informatie opvragen |
-| NoticeEOS | `notice-eos-url` | Notificatie einde levering |
-| NoticeEOSNotification | `notice-eos-url` | Inkomende EOS notificatie bevestigen |
-| MeterReadingExchange | `meter-reading-url` | Meterstanden uitwisselen (pull) |
-| MeterReadingExchangeNotification | `meter-reading-url` | Meterstanden insturen |
-| RejectionMeterReading | `meter-reading-url` | Afwijzingen meterstanden ophalen |
-| MeterReadingRejectionNotification | `meter-reading-url` | Afwijzing bevestigen |
-| MeterReadingRejection | `meter-reading-url` | Afwijzing insturen |
+| NameChange | `name-change-url` | Name change on connection |
+| MasterData | `master-data-url` | Retrieve master data for EAN |
+| MasterDataBatch | `master-data-batch-url` | Batch master data |
+| MasterDataUpdate | `master-data-update-url` | Receive master data updates (pull) |
+| GetMeteringPointMP | `get-metering-point-url` | Full metering point info per EAN |
+| SearchMeteringPointsMP | `search-metering-points-url` | Search metering points |
+| GetSCMPInformation | `get-scmp-information-url` | Retrieve SCMP information |
+| NoticeEOS | `notice-eos-url` | End of supply notification |
+| NoticeEOSNotification | `notice-eos-url` | Confirm incoming EOS notification |
+| MeterReadingExchange | `meter-reading-url` | Exchange meter readings (pull) |
+| MeterReadingExchangeNotification | `meter-reading-url` | Submit meter readings |
+| RejectionMeterReading | `meter-reading-url` | Retrieve meter reading rejections |
+| MeterReadingRejectionNotification | `meter-reading-url` | Confirm rejection |
+| MeterReadingRejection | `meter-reading-url` | Submit rejection |
 
-### Batch resultaten (`/b2b/batch/`)
+### Batch results (`/b2b/batch/`)
 
-| Operation | Config key | Beschrijving |
+| Operation | Config key | Description |
 |-----------|-----------|-------------|
-| GainResult | `loss-gain-reject-update-url` | Gewonnen aansluitingen ophalen |
-| LossResult | `loss-gain-reject-update-url` | Verloren aansluitingen ophalen |
-| RejectionResult | `loss-gain-reject-update-url` | Afwijzingen ophalen |
-| UpdateResult | `loss-gain-reject-update-url` | Updates ophalen |
+| GainResult | `loss-gain-reject-update-url` | Retrieve gained connections |
+| LossResult | `loss-gain-reject-update-url` | Retrieve lost connections |
+| RejectionResult | `loss-gain-reject-update-url` | Retrieve rejections |
+| UpdateResult | `loss-gain-reject-update-url` | Retrieve updates |
 
-### P4 (meterstand batch)
+### P4 (meter reading batch)
 
-| Operation | URL | Beschrijving |
+| Operation | URL | Description |
 |-----------|-----|-------------|
-| P4CollectedDataBatchRequest | `edsn.p4-url` | Meterstanden batch insturen |
-| P4CollectedDataBatchResultRequest | `edsn.p4-url` | Resultaat batch ophalen |
+| P4CollectedDataBatchRequest | `edsn.p4-url` | Submit meter readings batch |
+| P4CollectedDataBatchResultRequest | `edsn.p4-url` | Retrieve batch result |
 
 ---
 
-## 5. Request/Response — alle geteste scenarios (uit edsn-api.docx)
+## 5. Request/Response — all tested scenarios (from edsn-api.docx)
 
-> Exacte JSON uit de kwalificatie screenshots op OPT environment.
+> Exact JSON from the qualification screenshots on OPT environment.
 
 ---
 
 ### 5.1 MoveIn
+
+**URL:** `POST /api/moveIn`
 
 **Request**
 ```json
@@ -156,6 +158,8 @@ Alle paths zijn relatief t.o.v. `edsn.base-url`.
 
 ### 5.2 MoveOut
 
+**URL:** `POST /api/moveOut`
+
 **Request**
 ```json
 {
@@ -195,6 +199,8 @@ Alle paths zijn relatief t.o.v. `edsn.base-url`.
 ---
 
 ### 5.3 ChangeOfSupplier
+
+**URL:** `POST /api/changeOfSupplier`
 
 **Request**
 ```json
@@ -238,6 +244,8 @@ Alle paths zijn relatief t.o.v. `edsn.base-url`.
 
 ### 5.4 EndOfSupply
 
+**URL:** `POST /api/endOfSupply`
+
 **Request**
 ```json
 {
@@ -277,6 +285,8 @@ Alle paths zijn relatief t.o.v. `edsn.base-url`.
 ---
 
 ### 5.5 ChangeOfPV
+
+**URL:** `POST /api/changeOfPV`
 
 **Request**
 ```json
@@ -320,6 +330,8 @@ Alle paths zijn relatief t.o.v. `edsn.base-url`.
 
 ### 5.6 NameChange
 
+**URL:** `POST /api/nameChange`
+
 **Request**
 ```json
 {
@@ -359,12 +371,14 @@ Alle paths zijn relatief t.o.v. `edsn.base-url`.
 
 ### 5.7 GetMeteringPointMP
 
+**URL:** `POST /api/getMeteringPoint`
+
 **Request**
 ```json
 { "eanid": "112089200000000193" }
 ```
 
-**Response** (ELK — smart meter met 4 registers)
+**Response (ELK — smart meter with 4 registers)**
 ```json
 {
   "portaalMeteringPoint": {
@@ -440,6 +454,8 @@ Alle paths zijn relatief t.o.v. `edsn.base-url`.
 
 ### 5.8 MasterData
 
+**URL:** `POST /api/masterData`
+
 **Request**
 ```json
 {
@@ -513,6 +529,8 @@ Alle paths zijn relatief t.o.v. `edsn.base-url`.
 
 ### 5.9 SearchMeteringPointsMP
 
+**URL:** `POST /api/searchMeteringPoints`
+
 **Request**
 ```json
 { "eanid": "112029900000014234" }
@@ -561,9 +579,11 @@ Alle paths zijn relatief t.o.v. `edsn.base-url`.
 
 ### 5.10 GainResult / LossResult
 
-Geen request body — pull operatie. EDSN geeft lijst terug van gewonnen (Gain) of verloren (Loss) aansluitingen.
+**URL:** `POST /api/gainResult` · `POST /api/lossResult`
 
-**Response (GainResult voorbeeld)**
+No request body — pull operation. EDSN returns a list of gained (Gain) or lost (Loss) connections.
+
+**Response (GainResult example)**
 ```json
 {
   "portaalMeteringPoint": [{
@@ -588,7 +608,7 @@ Geen request body — pull operatie. EDSN geeft lijst terug van gewonnen (Gain) 
 }
 ```
 
-**Response (LossResult — lege lijst)**
+**Response (LossResult — empty list)**
 ```json
 { "portaalMeteringPoint": [] }
 ```
@@ -597,7 +617,9 @@ Geen request body — pull operatie. EDSN geeft lijst terug van gewonnen (Gain) 
 
 ### 5.11 MasterDataUpdate
 
-Geen request body — pull operatie. Haalt updates op die grid operator heeft doorgestuurd.
+**URL:** `POST /api/masterDataUpdate`
+
+No request body — pull operation. Retrieves updates sent by the grid operator.
 
 **Response (GAS meter)**
 ```json
@@ -657,7 +679,9 @@ Geen request body — pull operatie. Haalt updates op die grid operator heeft do
 
 ### 5.12 MeterReadingExchangeNotification
 
-Meterstand insturen naar EDSN (supplier stuurt).
+**URL:** `POST /api/meterReadingExchangeNotification`
+
+Submit meter reading to EDSN (supplier pushes).
 
 **Request**
 ```json
@@ -695,7 +719,9 @@ Meterstand insturen naar EDSN (supplier stuurt).
 
 ### 5.13 MeterReadingExchangeRequest (pull)
 
-Meterstanden ophalen bij EDSN.
+**URL:** `POST /api/meterReadingExchange`
+
+Retrieve meter readings from EDSN.
 
 **Request**
 ```json
@@ -748,6 +774,8 @@ Meterstanden ophalen bij EDSN.
 
 ### 5.14 GetSCMPInformation
 
+**URL:** `POST /api/getSCMPInformation`
+
 **Request**
 ```json
 {
@@ -759,7 +787,7 @@ Meterstanden ophalen bij EDSN.
 }
 ```
 
-**Response (GAS meter met volledig masterdata)**
+**Response (GAS meter with complete master data)**
 ```json
 {
   "portaalMeteringPoint": {
@@ -810,21 +838,21 @@ Meterstanden ophalen bij EDSN.
 
 ### MutationReason codes
 
-| Code | Operatie |
+| Code | Operation |
 |------|---------|
 | `MOVEIN` | MoveIn |
 | `MOVEOUT` | MoveOut |
 | `SWITCHLV` | ChangeOfSupplier |
 | `EOSUPPLY` | EndOfSupply |
 | `SWITCHPV` | ChangeOfPV |
-| `DSTRCONN` | MasterData (directe verbinding) |
-| `PERMTR` | MeterReadingExchange (permanente meterstand) |
+| `DSTRCONN` | MasterData (direct connection) |
+| `PERMTR` | MeterReadingExchange (permanent meter reading) |
 
 ---
 
 ## 6. Test data (OPT environment)
 
-| Veld | Waarde |
+| Field | Value |
 |------|--------|
 | Grid operator ID | `1120892404300` |
 | Balance supplier (Crawler) | `8720892404305` |
@@ -834,32 +862,32 @@ Meterstanden ophalen bij EDSN.
 
 ---
 
-## 7. Implementatiestatus
+## 7. Implementation status
 
-| Onderdeel | Status |
+| Component | Status |
 |-----------|--------|
-| WSDL generated classes | ✅ Aanwezig (gegenereerd in `target/`) |
-| `EdsnService.java` | ✅ Volledig geïmplementeerd |
-| `EdsnController.java` | ✅ Volledig geïmplementeerd |
+| WSDL generated classes | ✅ Present (generated in `target/`) |
+| `EdsnService.java` | ✅ Fully implemented |
+| `EdsnController.java` | ✅ Fully implemented |
 | WS-Security / mTLS | ✅ `WSS4JSecurityHandler` + `TrustAllCertificates` |
-| URL configuratie (alle omgevingen) | ✅ Geconfigureerd in `application-dev.yml` / `application-prod.yml` |
-| Keystore bestand | ✅ `keystore-crawler.p12` in classpath |
+| URL configuration (all environments) | ✅ Configured in `application-dev.yml` / `application-prod.yml` |
+| Keystore file | ✅ `keystore-crawler.p12` in classpath |
 
-**Conclusie**: EDSN integratie is volledig geïmplementeerd. Geen ontbrekende onderdelen voor basisfunctionaliteit.
+**Conclusion**: EDSN integration is fully implemented. No missing components for basic functionality.
 
 ---
 
-## 8. Relevante bestanden
+## 8. Relevant files
 
 ```
 src/main/java/nl/crawler/custom/
 ├── controller/EdsnController.java          ← REST endpoints (30+ operations)
 └── service/edsn/
-    ├── EdsnService.java                    ← SOAP client implementatie
+    ├── EdsnService.java                    ← SOAP client implementation
     ├── WSS4JSecurityHandler.java           ← WS-Security handler
-    ├── WSSecurityCrypto.java               ← Crypto configuratie
+    ├── WSSecurityCrypto.java               ← Crypto configuration
     ├── TrustAllCertificates.java           ← SSL trust-all (test only)
-    └── WSSecurityHandler.java              ← Alternatieve security handler
+    └── WSSecurityHandler.java              ← Alternative security handler
 
 src/main/resources/
 ├── keystore-crawler.p12                    ← PKCS12 certificate
@@ -868,40 +896,40 @@ src/main/resources/
     └── application-prod.yml                ← URLs: portaal-opt.edsn.nl
 
 .claude/tasks/
-├── edsn-api.docx                           ← Kwalificatie document (origineel)
-└── edsn-integration-summary.md             ← Dit bestand
+├── edsn-api.docx                           ← Qualification document (original)
+└── edsn-integration-summary.md             ← This file
 ```
 
 ---
 
 ## 9. Mock EDSN Gateway — Implementation Plan
 
-> Reden: portaal-act.edsn.nl is instabiel (soms werkt het, soms niet).
-> Doel: stabiele lokale mock zodat business logic ontwikkeld kan worden zonder netwerkafhankelijkheid.
+> Reason: portaal-act.edsn.nl is unstable (sometimes works, sometimes not).
+> Goal: stable local mock so business logic can be developed without network dependency.
 
-### 9.1 Aanpak
+### 9.1 Approach
 
-**Strategie:** `MockEdsnService extends EdsnService` met `@Primary @Profile("mock")`.
-Spring injecteert de mock in `EdsnController` (die `private final EdsnService edsnService` declareert) — **nul codewijzigingen** in bestaande klassen.
+**Strategy:** `MockEdsnService extends EdsnService` with `@Primary @Profile("mock")`.
+Spring injects the mock into `EdsnController` (which declares `private final EdsnService edsnService`) — **zero code changes** in existing classes.
 
-**Activeren:**
+**Activate:**
 ```
 --spring.profiles.active=dev,mock
 ```
 
-**Bestand aan te maken:**
+**File to create:**
 ```
 src/main/java/nl/crawler/custom/service/edsn/MockEdsnService.java
 ```
 
 ---
 
-### 9.2 EAN-strategie
+### 9.2 EAN strategy
 
-EAN is al aanwezig in DB (opgehaald via `ecbinfoset` API bij contractaanmaak).
+EAN is already present in DB (retrieved via `ecbinfoset` API at contract creation).
 
-- **Mutation methods** (`moveIn`, `moveOut`, `changeOfSupplier`, `endOfSupply`, `changeOfPV`, `nameChange`, batch-varianten): echo EAN uit request terug in response + auto-increment dossier ID.
-- **`getMeteringPoint`**: injecteer `EanRepositoryCustom` → lees `productType` uit DB → bouw ELK (4 registers) of GAS (1 register) response. Fallback: ELK dual tariff.
+- **Mutation methods** (`moveIn`, `moveOut`, `changeOfSupplier`, `endOfSupply`, `changeOfPV`, `nameChange`, batch variants): echo EAN from request back in response + auto-increment dossier ID.
+- **`getMeteringPoint`**: inject `EanRepositoryCustom` → read `productType` from DB → build ELK (4 registers) or GAS (1 register) response. Fallback: ELK dual tariff.
 
 ---
 
@@ -909,25 +937,25 @@ EAN is al aanwezig in DB (opgehaald via `ecbinfoset` API bij contractaanmaak).
 
 | Method(s) | Mock response |
 |---|---|
-| `moveIn`, `moveOut`, `changeOfSupplier`, `endOfSupply`, `changeOfPV`, `nameChange` | Echo EAN + dossier ID (AtomicLong vanaf `113656857`) + mutationReason per method |
-| Batch-varianten (`moveInBatch`, ...) | Lege batch container |
-| `getMeteringPoint` | DB lookup productType → ELK: 4 registers (1.8.1/1.8.2/2.8.1/2.8.2) of GAS: 1 register (1.8.2) |
-| `masterData`, `masterDataBatch`, `masterDataUpdate` | Lege container (nog niet in gebruik) |
-| `searchMeteringPoints` | Lege lijst |
-| `getSCMPInformation` | Lege container |
+| `moveIn`, `moveOut`, `changeOfSupplier`, `endOfSupply`, `changeOfPV`, `nameChange` | Echo EAN + dossier ID (AtomicLong from `113656857`) + mutationReason per method |
+| Batch variants (`moveInBatch`, ...) | Empty batch container |
+| `getMeteringPoint` | DB lookup productType → ELK: 4 registers (1.8.1/1.8.2/2.8.1/2.8.2) or GAS: 1 register (1.8.2) |
+| `masterData`, `masterDataBatch`, `masterDataUpdate` | Empty container (not yet in use) |
+| `searchMeteringPoints` | Empty list |
+| `getSCMPInformation` | Empty container |
 | **Supplier switching** | |
-| `gainResult` | 1 metering point: EAN uit last call, mutationReason=SWITCHLV, dossier ID |
+| `gainResult` | 1 metering point: EAN from last call, mutationReason=SWITCHLV, dossier ID |
 | `lossResult` | 1 metering point: EAN ELK test, mutationReason=SWITCHLV |
 | `rejectionResult` | 1 rejection: rejectionCode=`EAN_ALREADY_IN_SWITCH` |
 | `updateResult` | 1 update: status=CONFIRMED |
 | **Meter reading** | |
 | `meterReadingExchange` (pull) | ACK: `edsnsimpleRejection = null` |
 | `meterReadingExchangeNotification` (push) | ACK: `edsnsimpleRejection = null` |
-| `rejectionMeterReading`, `meterReadingRejectionNotification`, `meterReadingRejection` | Lege container |
+| `rejectionMeterReading`, `meterReadingRejectionNotification`, `meterReadingRejection` | Empty container |
 | `p4` | ACK ACCEPTED |
-| `p4Result` | 24 hourly records voor EAN ELK (2025-02-12): uur 00–07 = T2 dal (~0.10 kWh/uur), uur 07–23 = T1 piek (~0.45 kWh/uur), uur 10–14 = T3 piek productie (~0.35 kWh/uur) |
+| `p4Result` | 24 hourly records for EAN ELK (2025-02-12): hour 00–07 = T2 off-peak (~0.10 kWh/h), hour 07–23 = T1 peak (~0.45 kWh/h), hour 10–14 = T3 peak production (~0.35 kWh/h) |
 | **EOS** | |
-| `noticeEOS`, `noticeEOSNotification` | ACK / lege container |
+| `noticeEOS`, `noticeEOSNotification` | ACK / empty container |
 
 ---
 
@@ -935,13 +963,13 @@ EAN is al aanwezig in DB (opgehaald via `ecbinfoset` API bij contractaanmaak).
 
 **Trigger A — Magic EAN** (per call):
 
-| EAN | Gedrag |
+| EAN | Behavior |
 |---|---|
-| `000000000000000500` | Gooit `WebServiceFaultException` (EDSN 500) |
+| `000000000000000500` | Throws `WebServiceFaultException` (EDSN 500) |
 | `000000000000000408` | Sleep 30s → `ResourceAccessException` (timeout) |
-| `000000000000000422` | Gooit `WebServiceFaultException` (EDSN rejection) |
+| `000000000000000422` | Throws `WebServiceFaultException` (EDSN rejection) |
 
-**Trigger B — Global property** (alle calls):
+**Trigger B — Global property** (all calls):
 
 ```yaml
 # application-mock.yml
@@ -950,11 +978,11 @@ mock:
     scenario: happy   # happy | error-500 | timeout | reject
 ```
 
-Elke method roept eerst `applyScenario()` en `checkErrorTrigger(ean)` aan vóór happy path.
+Each method first calls `applyScenario()` and `checkErrorTrigger(ean)` before the happy path.
 
 ---
 
-### 9.5 Constanten
+### 9.5 Constants
 
 ```
 GRID_OPERATOR_ID        = "1120892404300"
