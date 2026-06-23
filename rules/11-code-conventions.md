@@ -217,6 +217,46 @@ public interface InvoiceMapper {
 
 ---
 
+## Optional
+
+**Quy tắc:** Không dùng `isPresent()` + `get()` thô — luôn dùng functional API của Optional.
+
+```java
+// SAI — get() không an toàn, compiler không bắt được nếu check bị xóa
+if (lastInvoice.isPresent()) {
+    current = lastInvoice.get().getEndDate().plusDays(1);
+} else {
+    current = agreement.getEffectiveDate();
+}
+
+// ĐÚNG — có fallback value
+LocalDate current = lastInvoice
+    .map(inv -> inv.getEndDate().plusDays(1))
+    .orElse(agreement.getEffectiveDate());
+
+// ĐÚNG — có fallback value + side effect (log)
+LocalDate current = lastInvoice
+    .map(inv -> inv.getEndDate().plusDays(1))
+    .orElseGet(() -> {
+        log.warn("...", agreement.getId(), agreement.getEffectiveDate());
+        return agreement.getEffectiveDate();
+    });
+
+// ĐÚNG — không có fallback, throw exception
+Invoice invoice = invoiceRepository.findById(id)
+    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND,
+        ErrorName.INVOICE_NOT_FOUND__BILLING));
+```
+
+| Pattern | Dùng khi |
+|---------|---------|
+| `.map(...).orElse(default)` | Có fallback value đơn giản |
+| `.map(...).orElseGet(() -> {...})` | Có fallback + side effect (log, compute) |
+| `.orElseThrow(...)` | Không có fallback, missing = lỗi |
+| `.ifPresent(...)` | Chỉ cần execute khi present, không cần giá trị trả về |
+
+---
+
 ## Exception Handling
 
 **Throw exception trong service:**
@@ -449,6 +489,68 @@ log.error("Failed to generate invoice for agreementId={}", agreementId, ex);
 - `log.error` — exception có tác động business
 - Không log sensitive data (IBAN, BSN, passwords)
 - Dùng parameterized logging (`{}`) — không dùng string concatenation
+
+---
+
+## Debuggability
+
+**Quy tắc:** Không return inline expression phức tạp — assign ra biến tại từng bước để debugger có thể inspect giá trị.
+
+**Case 1 — Stream/Optional đơn:**
+```java
+// SAI
+private Optional<EnergyProductUsageDTO> getEnergyProductUsage(...) {
+    return estimationUsage.energyProducts().stream()
+        .filter(item -> item.productType() == productType)
+        .findFirst();
+}
+
+// ĐÚNG — inspect result trước khi return
+private Optional<EnergyProductUsageDTO> getEnergyProductUsage(...) {
+    Optional<EnergyProductUsageDTO> result = estimationUsage.energyProducts().stream()
+        .filter(item -> item.productType() == productType)
+        .findFirst();
+    return result;
+}
+```
+
+**Case 2 — Multiple flatMap chain (không biết bước nào empty):**
+```java
+// SAI — không biết flatMap nào trả về empty khi debug
+private BigDecimal extractTariffChargesByType(...) {
+    return productOffering.getProductOfferingPrices().stream()
+        .findFirst()
+        .flatMap(price -> price.getTariffs().stream()
+            .filter(tariff -> tariffEnum == tariff.getType()).findFirst())
+        .flatMap(tariff -> tariff.getTariffHistories().stream()
+            .filter(history -> ...)
+            .max(Comparator.comparing(TariffHistory::getEffectiveDate))
+            .map(history -> BigDecimal.valueOf(history.getTariff())))
+        .orElse(BigDecimal.ZERO);
+}
+
+// ĐÚNG — đặt breakpoint tại bất kỳ bước nào, inspect từng Optional
+private BigDecimal extractTariffChargesByType(...) {
+    Optional<ProductOfferingPrice> firstPrice = productOffering
+        .getProductOfferingPrices().stream().findFirst();
+
+    Optional<Tariff> matchingTariff = firstPrice
+        .flatMap(price -> price.getTariffs().stream()
+            .filter(tariff -> tariffEnum == tariff.getType()).findFirst());
+
+    Optional<BigDecimal> tariffValue = matchingTariff
+        .flatMap(tariff -> tariff.getTariffHistories().stream()
+            .filter(history -> ...)
+            .max(Comparator.comparing(TariffHistory::getEffectiveDate))
+            .map(history -> BigDecimal.valueOf(history.getTariff())));
+
+    return tariffValue.orElse(BigDecimal.ZERO);
+}
+```
+
+**Áp dụng khi:** Stream chain, Optional chain có nhiều bước, hoặc multiple flatMap.
+
+**Không áp dụng khi:** Expression đơn giản 1 bước — `return repository.findById(id)` vẫn chấp nhận được.
 
 ---
 
