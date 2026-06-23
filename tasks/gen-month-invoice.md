@@ -197,6 +197,17 @@ This ensures there is no missing billing period before the next regular billing 
 
 # Invoice Generation Jobs & Tools
 
+## Purpose of Each API
+
+| API | Purpose |
+| --- | ------- |
+| `generateMonthInvoice` | Generate initial invoice(s) at supply start (onboarding) |
+| `generateInvoicesOfYear` | Backfill missing invoices for a specific customer and year |
+| `generateInvoicesWithCustomDate` | Backfill missing invoices for all agreements up to a given date |
+| `runMonthlyBillingJob` | Regular 15th job — generate next month's invoice only |
+
+---
+
 ## Monthly Billing Job (`runMonthlyBillingJob`)
 
 **Purpose:** Generate the advance invoice for the next month. Runs on the 15th.
@@ -211,6 +222,10 @@ This ensures there is no missing billing period before the next regular billing 
 runDate = 15/06/2026
 → generates invoice for: 01/07/2026 – 31/07/2026
 ```
+
+| API | targetEnd | jobDate |
+| --- | --------- | ------- |
+| `runMonthlyBillingJob` | firstDay(runDate + 1 month) to lastDay | runDate |
 
 ---
 
@@ -232,6 +247,10 @@ invoiceDate = 17/07/2024
 → backfills all missing months from effectiveDate to August
 ```
 
+| API | targetEnd | jobDate |
+| --- | --------- | ------- |
+| `generateInvoicesWithCustomDate` | lastDay(invoiceDate + 1 month) | invoiceDate |
+
 ---
 
 ## Generate By ID (`generateInvoicesOfYear`)
@@ -251,6 +270,22 @@ year = 2026, today = 23/06/2026
 → backfills all missing months from effectiveDate to July 2026
 ```
 
+| API | targetEnd | jobDate |
+| --- | --------- | ------- |
+| `generateInvoicesOfYear` (current year) | min(lastDay(today + 1 month), yearEnd) | today |
+| `generateInvoicesOfYear` (past year) | yearEnd (31 Dec) | today |
+
+---
+
+## Generate Month Invoice (`generateMonthInvoice`)
+
+**Purpose:** Generate initial invoice(s) when a new agreement becomes active (onboarding).
+
+| API | targetEnd | jobDate |
+| --- | --------- | ------- |
+| `generateMonthInvoice` (effectiveDate ≤ 15) | endOfMonth(effectiveDate) | today |
+| `generateMonthInvoice` (effectiveDate > 15) | endOfNextMonth(effectiveDate) | today |
+
 ---
 
 ## Key Distinction
@@ -258,7 +293,24 @@ year = 2026, today = 23/06/2026
 | | Monthly Billing Job | Generate All / Generate By ID |
 |---|---|---|
 | Purpose | Gen future invoice (next month) | Backfill missing invoices |
-| Starting point | Last invoice (forward only) | `agreement.effectiveDate` |
+| Starting point | Next month (forward only) | `agreement.effectiveDate` |
 | Gap detection | No | Yes (1 query per agreement) |
 | Frequency | Every 15th | On demand (infrequent) |
 | Run date input | 15th of month only | Any date |
+
+---
+
+## dueDate Rule (Dutch market)
+
+`dueDate` is **not stored on the Invoice entity**. It is computed at PDF/UBL render time only.
+
+```
+issueDate = LocalDate.now()           ← moment the document is downloaded/rendered
+dueDate   = issueDate + paymentDueDays
+```
+
+`paymentDueDays` defaults to **14**, configurable via `invoice.payment-due-days` in application config.
+
+Compliant with Dutch *betaaltermijn* rules (ACM).
+
+> **Note:** For backfilled invoices (past periods), `issueDate` will be the date the PDF is rendered — not the original job date. This is pre-existing behavior unrelated to the job/backfill changes.
