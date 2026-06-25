@@ -695,9 +695,11 @@ Submit meter reading to EDSN (supplier pushes).
         "measureUnit": "MTQ",
         "meteringDirection": "LVR",
         "nrOfDigits": 5,
-        "reading": "600",
-        "readingDate": "2025-02-12",
-        "readingMethod": "22"
+        "reading": {
+          "reading": "600",
+          "readingDate": "2025-02-12",
+          "readingMethod": "22"
+        }
       }]
     }
   }],
