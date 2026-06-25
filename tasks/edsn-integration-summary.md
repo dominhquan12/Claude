@@ -838,6 +838,117 @@ Retrieve meter readings from EDSN.
 
 ---
 
+### 5.15 P4 — Submit batch meter readings
+
+**URL:** `POST /api/p4`
+
+Submit một lô yêu cầu đọc dữ liệu smart meter lên EDSN. EDSN xử lý bất đồng bộ — kết quả lấy qua `p4Result`.
+
+**QueryReason codes:** `DAY` (Dagstand — đọc ngày), `INT` (Intervalstand — interval), `RCY` (maandstand recovery)
+
+**Request**
+```json
+{
+  "p4MeteringPoint": [
+    {
+      "eanid": "112089200000000193",
+      "externalReference": "20250212001",
+      "queryDate": "2025-02-12",
+      "queryReason": "DAY"
+    }
+  ]
+}
+```
+
+**Response (ACK — accepted)**
+```json
+{
+  "p4Rejection": null
+}
+```
+
+**Response (rejected)**
+```json
+{
+  "p4Rejection": {
+    "rejectionCode": "INVALID_EAN",
+    "rejectionDescription": "EAN not found"
+  }
+}
+```
+
+---
+
+### 5.16 P4Result — Retrieve batch meter reading results
+
+**URL:** `POST /api/p4Result`
+
+Poll để lấy kết quả của lô P4 đã submit. Trả về hourly records per register (OBIS code) per EAN. Không có request body.
+
+**Request:** _(no body)_
+
+**Response (ELK smart meter — 4 registers, rút gọn 3 giờ đại diện per register)**
+```json
+{
+  "p4MeteringPoint": [
+    {
+      "eanid": "871687500000000001",
+      "externalReference": "MOCK-871687500000000001",
+      "queryDate": "2025-02-12",
+      "queryReason": "DAY",
+      "p4EnergyMeter": [
+        {
+          "p4Register": [
+            {
+              "id": "1-0:1.8.1",
+              "measureUnit": "KWH",
+              "p4Reading": [
+                { "reading": 0.00, "readingDateTime": "2025-02-12T00:00:00.000+01:00" },
+                { "reading": 0.45, "readingDateTime": "2025-02-12T07:00:00.000+01:00" },
+                { "reading": 0.45, "readingDateTime": "2025-02-12T12:00:00.000+01:00" }
+              ]
+            },
+            {
+              "id": "1-0:1.8.2",
+              "measureUnit": "KWH",
+              "p4Reading": [
+                { "reading": 0.12, "readingDateTime": "2025-02-12T00:00:00.000+01:00" },
+                { "reading": 0.00, "readingDateTime": "2025-02-12T07:00:00.000+01:00" },
+                { "reading": 0.00, "readingDateTime": "2025-02-12T12:00:00.000+01:00" }
+              ]
+            },
+            {
+              "id": "1-0:2.8.1",
+              "measureUnit": "KWH",
+              "p4Reading": [
+                { "reading": 0.00, "readingDateTime": "2025-02-12T00:00:00.000+01:00" },
+                { "reading": 0.00, "readingDateTime": "2025-02-12T07:00:00.000+01:00" },
+                { "reading": 0.35, "readingDateTime": "2025-02-12T10:00:00.000+01:00" }
+              ]
+            },
+            {
+              "id": "1-0:2.8.2",
+              "measureUnit": "KWH",
+              "p4Reading": [
+                { "reading": 0.00, "readingDateTime": "2025-02-12T00:00:00.000+01:00" },
+                { "reading": 0.00, "readingDateTime": "2025-02-12T07:00:00.000+01:00" },
+                { "reading": 0.00, "readingDateTime": "2025-02-12T12:00:00.000+01:00" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+> Full response có 24 readings per register (24 giờ). Response trên rút gọn 3 giờ đại diện per register để dễ đọc.
+>
+> Register mapping: `1-0:1.8.1` = T1 piek consumption, `1-0:1.8.2` = T2 dal consumption, `1-0:2.8.1` = T3 piek production (solar), `1-0:2.8.2` = T4 dal production (solar).
+
+---
+
 ### MutationReason codes
 
 | Code | Operation |
