@@ -1,0 +1,197 @@
+Enum customer_type {
+  B2B
+  B2C
+}
+
+
+Table user {
+  id bigint [pk]
+  username varchar unique
+}
+
+
+Table role {
+  id bigint [pk]
+  code varchar unique
+}
+
+Table permission {
+  id bigint [pk]
+  code varchar unique
+}
+
+
+Table role_permission {
+  id bigint [pk]
+  role_id bigint
+  permission_id bigint
+}
+
+Table membership {
+  id bigint [pk]
+  user_id bigint
+  role_id bigint
+  customer_id bigint
+  brand_id bigint
+}
+
+Table brand {
+  id bigint [pk]
+  name varchar
+  organisation_id bigint
+}
+
+Table customer {
+  id bigint [pk]
+  customer_type customer_type
+  kvk_number varchar unique
+  email varchar unique
+  organisation_id bigint
+}
+
+Table organisation {
+  id bigint [pk]
+  kvk_number varchar unique
+  name varchar
+}
+
+Table customer_order {
+  id bigint [pk]
+  customer_id bigint
+}
+
+
+Table address {
+  id bigint [pk]
+  postal_code varchar
+  house_number varchar
+  house_number_extension varchar
+  street varchar
+  city varchar
+  country varchar
+}
+
+Table product_order {
+  id bigint [pk]
+  customer_order_id bigint
+  service_location_id bigint
+}
+
+Table product {
+  id bigint [pk]
+  product_order_id bigint
+  ean_id bigint
+}
+
+Table ean {
+  id bigint [pk]
+  code varchar unique
+  customer_order_id bigint
+  service_location_id bigint
+}
+
+Table meter {
+  id bigint [pk]
+  code varchar unique
+  ean_id bigint
+}
+
+Table meter_reading {
+  id bigint [pk]
+  meter_id bigint
+  ean_id bigint
+}
+
+Table contract {
+  id bigint [pk]
+  effective_date date
+  customer_id bigint
+}
+
+Table contract_holder {
+  id bigint [pk]
+  contract_id bigint
+  valid_from timestamp
+  email varchar
+  first_name varchar
+  last_name varchar
+  phone_number varchar
+  date_of_birth date
+}
+
+
+Table contract_contact {
+  id bigint [pk]
+  contract_id bigint
+  valid_from timestamp
+  email varchar
+  first_name varchar
+  last_name varchar
+  phone_number varchar
+  date_of_birth date
+}
+
+
+Table contract_billing_address {
+  id bigint [pk]
+  contract_id bigint
+  valid_from timestamp
+  postal_code varchar
+  house_number varchar
+  house_number_extension varchar
+  street varchar
+  city varchar
+  country varchar
+}
+
+
+Table contract_bank_account {
+  id bigint [pk]
+  contract_id bigint
+  valid_from timestamp
+  bank_account_number varchar
+  holder_name varchar
+}
+
+
+Ref: "contract"."id" < "contract_holder"."contract_id"
+
+Ref: "contract"."id" < "contract_contact"."contract_id"
+
+Ref: "contract"."id" < "contract_billing_address"."contract_id"
+
+Ref: "contract"."id" < "contract_bank_account"."contract_id"
+
+Ref: "customer"."id" < "contract"."customer_id"
+
+Ref: "organisation"."id" < "customer"."organisation_id"
+
+Ref: "customer"."id" < "customer_order"."customer_id"
+
+Ref: "address"."id" < "product_order"."service_location_id"
+
+Ref: "customer_order"."id" < "product_order"."customer_order_id"
+
+Ref: "ean"."id" < "product"."ean_id"
+
+Ref: "address"."id" < "ean"."service_location_id"
+
+Ref: "product_order"."id" < "product"."product_order_id"
+
+Ref: "ean"."id" < "meter"."ean_id"
+
+Ref: "meter"."id" < "meter_reading"."meter_id"
+
+Ref: "ean"."id" < "meter_reading"."ean_id"
+
+Ref: "user"."id" < "membership"."user_id"
+
+Ref: "role"."id" < "membership"."role_id"
+
+Ref: "customer"."id" < "membership"."customer_id"
+
+Ref: "role"."id" < "role_permission"."role_id"
+
+Ref: "permission"."id" < "role_permission"."permission_id"
+
+Ref: "organisation"."id" < "brand"."organisation_id"

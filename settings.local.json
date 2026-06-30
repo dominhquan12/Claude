@@ -46,7 +46,14 @@
       "Skill(run)",
       "PowerShell(Start-Process -FilePath \"C:\\\\crawlerenergie\\\\project\\\\crawler-backend\\\\mvnw.cmd\" -ArgumentList \"spring-boot:run\", \"-Dspring-boot.run.profiles=dev\" -WorkingDirectory \"C:\\\\crawlerenergie\\\\project\\\\crawler-backend\" -RedirectStandardOutput \"C:\\\\Users\\\\HP\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\app-stdout.log\" -RedirectStandardError \"C:\\\\Users\\\\HP\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\app-stderr.log\" -NoNewWindow; Write-Host \"Started\")",
       "Read(//c/Users/HP/AppData/Local/Temp/claude/**)",
-      "PowerShell(& \"C:\\\\Program Files\\\\PostgreSQL\\\\16\\\\bin\\\\psql.exe\" -U CrawlerBackend -d CrawlerBackend -c \"SELECT extname, extversion FROM pg_extension WHERE extname = 'timescaledb';\" 2>&1)"
+      "PowerShell(& \"C:\\\\Program Files\\\\PostgreSQL\\\\16\\\\bin\\\\psql.exe\" -U CrawlerBackend -d CrawlerBackend -c \"SELECT extname, extversion FROM pg_extension WHERE extname = 'timescaledb';\" 2>&1)",
+      "Bash(xargs grep -l \"grid_operator_capacity\")",
+      "Bash(PGPASSWORD=\"\" psql *)",
+      "PowerShell(& \"C:\\\\Program Files\\\\PostgreSQL\\\\17\\\\bin\\\\psql.exe\" -h localhost -p 5432 -U CrawlerBackend -d CrawlerBackend -c $query 2>&1)",
+      "Bash(psql *)",
+      "PowerShell(psql *)",
+      "PowerShell(docker exec crawlerbackend-postgresql-1 *)",
+      "PowerShell(Copy-Item *)"
     ]
   }
 }
