@@ -53,7 +53,8 @@
       "Bash(psql *)",
       "PowerShell(psql *)",
       "PowerShell(docker exec crawlerbackend-postgresql-1 *)",
-      "PowerShell(Copy-Item *)"
+      "PowerShell(Copy-Item *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\crawlerenergie\\\\project\\\\crawler-backend\\\\src\\\\main\\\\resources\\\\config\\\\liquibase\" -Recurse)"
     ]
   }
 }
