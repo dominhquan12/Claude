@@ -1,0 +1,159 @@
+-- ============================================================
+-- PHẦN 1: Test timestamp → timestamptz (đúng cách)
+-- ============================================================
+
+-- 0. Dọn bảng cũ nếu chạy lại nhiều lần
+DROP TABLE IF EXISTS tz_test;
+
+-- 1. Tạo bảng — cột timestamp giống convention hiện tại của dynamic_tariff
+CREATE TABLE tz_test (
+    id serial PRIMARY KEY,
+    event_time timestamp,
+    note varchar(50)
+);
+
+-- 2. Insert 1 record — dùng đúng con số record id=25 đã xem (giả lập Hibernate ghi UTC digit)
+INSERT INTO tz_test (event_time, note) VALUES ('2023-12-31 23:00:00', 'raw UTC digit');
+
+-- 3. Query khi còn là timestamp — thử đổi session timezone, xem số CÓ đổi không
+SELECT event_time FROM tz_test WHERE id = 1;
+
+SET TIME ZONE 'UTC';
+SELECT event_time FROM tz_test WHERE id = 1;          -- kỳ vọng: 2023-12-31 23:00:00.000
+
+SET TIME ZONE 'Europe/Amsterdam';
+SELECT event_time FROM tz_test WHERE id = 1;          -- kỳ vọng: VẪN 2023-12-31 23:00:00.000 (không đổi)
+
+SET TIME ZONE 'Asia/Ho_Chi_Minh';
+SELECT event_time FROM tz_test WHERE id = 1;          -- kỳ vọng: VẪN 2023-12-31 23:00:00.000 (không đổi)
+
+-- ============================================================
+-- 4. ĐỔI CỘT sang timestamptz — ĐÚNG cách, có USING ... AT TIME ZONE 'UTC'
+-- ============================================================
+ALTER TABLE tz_test
+    ALTER COLUMN event_time TYPE timestamptz
+    USING event_time AT TIME ZONE 'UTC';
+
+-- 5. Query lại — giờ event_time đã là timestamptz, đổi session timezone xem hiển thị có đổi theo
+SET TIME ZONE 'UTC';
+SELECT event_time FROM tz_test WHERE id = 1;          -- kỳ vọng: 2023-12-31 23:00:00+00
+
+SET TIME ZONE 'Europe/Amsterdam';
+SELECT event_time FROM tz_test WHERE id = 1;          -- kỳ vọng: 2024-01-01 00:00:00+01
+
+SET TIME ZONE 'Asia/Ho_Chi_Minh';
+SELECT event_time FROM tz_test WHERE id = 1;          -- kỳ vọng: 2024-01-01 06:00:00+07
+
+RESET TIME ZONE;  -- trả session về default
+
+
+-- ============================================================
+-- PHẦN 2 (BONUS): Minh hoạ lỗi nếu quên USING khi migrate
+-- ============================================================
+DROP TABLE IF EXISTS tz_test_wrong;
+
+CREATE TABLE tz_test_wrong (
+    id serial PRIMARY KEY,
+    event_time timestamp
+);
+
+INSERT INTO tz_test_wrong (event_time) VALUES ('2023-12-31 23:00:00');  -- cùng số với bảng đúng ở trên
+
+-- Giả sử người chạy migration đang có session timezone KHÔNG phải UTC (rất dễ xảy ra thực tế)
+SET TIME ZONE 'Asia/Ho_Chi_Minh';
+
+-- SAI — thiếu USING => Postgres coi digit naive đang theo session timezone hiện tại (+07:00), KHÔNG phải UTC
+ALTER TABLE tz_test_wrong
+    ALTER COLUMN event_time TYPE timestamptz;
+
+-- So sánh với bảng đúng ở trên
+SET TIME ZONE 'UTC';
+SELECT event_time FROM tz_test_wrong;   -- kỳ vọng: 2023-12-31 16:00:00+00  <- SAI, lệch 7h so với 2023-12-31 23:00:00+00
+
+RESET TIME ZONE;
+
+-- ============================================================
+-- Dọn dẹp sau khi test xong (chạy khi không cần nữa)
+-- ============================================================
+-- DROP TABLE IF EXISTS tz_test;
+-- DROP TABLE IF EXISTS tz_test_wrong;
+
+
+-- ============================================================
+-- KẾT QUẢ THỰC TẾ TRÊN DBEAVER — QUAN TRỌNG, ĐỌC TRƯỚC KHI TEST BƯỚC 5
+-- ============================================================
+--
+-- Chạy trên psql (docker exec vào postgres container), cùng 1 session,
+-- event_time đã là timestamptz — kết quả ĐÚNG như lý thuyết:
+--
+--   SET TIME ZONE 'UTC';              -> 2023-12-31 23:00:00+00
+--   SET TIME ZONE 'Europe/Amsterdam'; -> 2024-01-01 00:00:00+01
+--   SET TIME ZONE 'Asia/Ho_Chi_Minh'; -> 2024-01-01 06:00:00+07
+--
+-- Nhưng chạy CÙNG các lệnh y hệt trên DBeaver:
+--
+--   SET TIME ZONE 'UTC';
+--   SELECT event_time FROM tz_test WHERE id = 1;
+--   SET TIME ZONE 'Europe/Amsterdam';
+--   SELECT event_time FROM tz_test WHERE id = 1;
+--
+--   -> CẢ 2 LẦN ĐỀU RA: 2024-01-01 06:00:00.000 +0700  (giống nhau, không đổi theo SET TIME ZONE)
+--
+-- NGUYÊN NHÂN: psql dùng "simple/text protocol" — Postgres server tự format
+-- timestamptz thành text theo session TimeZone GUC trước khi gửi về, nên
+-- SET TIME ZONE ảnh hưởng trực tiếp lên text nhận được.
+--
+-- DBeaver (qua JDBC driver pgJDBC) thường dùng "extended/binary protocol" —
+-- Postgres gửi về RAW absolute value (microsecond từ epoch), KHÔNG áp dụng
+-- session TimeZone GUC ở bước này. Việc convert số đó thành text hiển thị
+-- là do JDBC driver/DBeaver tự làm ở phía CLIENT, dùng timezone riêng của nó
+-- (thường là timezone máy đang chạy DBeaver — ở đây là Asia/Ho_Chi_Minh,
+-- +07:00), hoàn toàn BỎ QUA lệnh SET TIME ZONE gửi qua SQL editor.
+--
+-- KẾT LUẬN:
+--   - Data/instant vẫn đúng 100% — 2024-01-01 06:00:00+07 chính là giá trị
+--     VN-local đúng của instant này (khớp kết quả psql dòng Asia/Ho_Chi_Minh).
+--   - DBeaver không phải "gương phản chiếu session TimeZone" — nó luôn hiển
+--     thị theo timezone cố định riêng của nó, không đổi theo SET TIME ZONE SQL.
+--   - Muốn đổi timezone hiển thị THẬT trong DBeaver: phải đổi ở setting của
+--     DBeaver/driver (Connection settings / Driver properties / Data Editor
+--     preferences), KHÔNG chạy SET TIME ZONE qua SQL editor.
+--   - Muốn test hành vi SET TIME ZONE đúng như lý thuyết Postgres: dùng psql
+--     CLI (hoặc client dùng simple/text protocol), không dùng DBeaver.
+
+
+-- ============================================================
+-- KẾT QUẢ THỰC TẾ TRÊN DBEAVER — PHẦN 2 (tz_test_wrong)
+-- BUG THẬT bị lỗi hiển thị DBeaver CHE MẤT do trùng offset
+-- ============================================================
+--
+-- Trên DBeaver, chạy: SELECT event_time FROM tz_test_wrong;
+--   -> Kết quả: 2023-12-31 23:00:00.000 +0700
+--   -> Nhìn giống digit gốc trước migrate (23:00:00) => tưởng migration ổn, KHÔNG ổn.
+--
+-- Verify bằng psql (tôn trọng SET TIME ZONE, cho giá trị THẬT):
+--
+--   SET TIME ZONE 'UTC';              -> 2023-12-31 16:00:00+00   <- giá trị THẬT lưu trong DB
+--   SET TIME ZONE 'Asia/Ho_Chi_Minh'; -> 2023-12-31 23:00:00+07   <- trùng số gốc NHƯNG LÀ SỐ SAI
+--
+-- GIẢI THÍCH — 2 lỗi cộng lại thành 1 sự trùng hợp gây hiểu lầm:
+--
+--   Lớp 1 (bug data THẬT): ALTER thiếu USING lúc session đang
+--   'Asia/Ho_Chi_Minh' (+07:00) => Postgres coi digit gốc 23:00:00 LÀ giờ
+--   +07:00 => absolute instant = 2023-12-31T16:00:00Z. SAI 7 giờ so với giá
+--   trị đúng phải là 2023-12-31T23:00:00Z (UTC).
+--
+--   Lớp 2 (lỗi hiển thị DBeaver — xem phần trên): DBeaver luôn hiển thị theo
+--   timezone cố định riêng của nó, ở đây là +07:00 (Asia/Ho_Chi_Minh).
+--
+--   Trùng hợp: offset SAI lúc migrate (+07:00) và offset CỐ ĐỊNH DBeaver dùng
+--   để hiển thị (+07:00) là CÙNG MỘT SỐ => 2 lỗi triệt tiêu nhau về mặt con số:
+--     16:00 UTC (giá trị sai đã lưu) + 7h (DBeaver luôn +7h khi hiển thị)
+--     = 23:00 => TRÙNG với digit gốc trước migrate, nhìn như không có gì sai.
+--
+-- KẾT LUẬN:
+--   - Dữ liệu tz_test_wrong ĐÃ BỊ SAI 7 giờ thật (bug đúng như dự đoán ở
+--     Phần 2), chỉ là DBeaver vô tình hiển thị ra đúng số cũ do luôn quy về
+--     +07:00 — KHÔNG được dùng DBeaver để verify migration timezone.
+--   - Luôn dùng psql + SET TIME ZONE 'UTC' trước khi so sánh số để verify
+--     migration đúng/sai — không tin vào con số DBeaver hiển thị mặc định.
