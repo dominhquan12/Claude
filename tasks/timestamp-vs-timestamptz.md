@@ -347,3 +347,52 @@ Chỉ **giống về ý nghĩa nếu quy ước được tuân thủ hoàn hảo
 2. Nếu có: đổi `master.xml` + `application.yml` trước (mục 13), test với entity mới, rồi mới viết migration changelog cho bảng cũ.
 3. Fix raw JDBC bind ở `DynamicTariffService`/`ImportServiceImpl` trước khi chạy migration (mục 8, item 3-4).
 4. Theo `CLAUDE.md`: mọi thay đổi trên qua `fix/` branch riêng → PR vào `dev` → promote từng PR `dev → tst → acc → prd`.
+
+---
+
+## 15. Plan thực thi — từng phase, theo đúng trình tự (gộp từ mục 8, 13, 14)
+
+> Checklist theo dõi tiến độ — tick khi hoàn thành. Mỗi phase nên là 1 PR riêng theo `CLAUDE.md` (branch từ `dev`, không dồn hết vào 1 PR).
+
+### Phase 0 — Fix code bypass Hibernate (làm TRƯỚC khi đổi bất kỳ type gì)
+> Mục đích: đảm bảo không có write path nào âm thầm sai nếu sau này cột đổi type.
+
+- [x] `UsageService.createUsage()` / `processReadings()` — fix EDSN boundary (đã làm trong phiên này, mục 3).
+- [ ] `DynamicTariffService.syncData()` (dòng ~101-107) — đổi `ps.setObject(1, LocalDateTime.ofInstant(...))` → `ps.setObject(1, entity.getFrom().atOffset(ZoneOffset.UTC))`.
+- [ ] `ImportServiceImpl.importHourlyProductUsages()` — cùng pattern, cùng fix.
+- [ ] Grep lại toàn repo tìm thêm chỗ `JdbcTemplate`/`PreparedStatement.setObject` bind timestamp thủ công khác (chưa rà hết, chỉ 2 chỗ trên được tìm thấy trong phiên này).
+
+**Branch gợi ý:** `fix/raw-jdbc-timestamp-bind` — có thể merge độc lập, không phụ thuộc phase sau, có giá trị dù có migrate `timestamptz` hay không (an toàn hơn cho tương lai).
+
+### Phase 1 — Đổi config để entity generate SAU NÀY ra `timestamptz`
+> Không ảnh hưởng bảng đã tồn tại — chỉ áp dụng cho entity/field mới.
+
+- [ ] `master.xml:11` — đổi `datetimeType` từ `datetime` → `timestamptz` (dbms=postgresql).
+- [ ] `application.yml` — đổi `hibernate.type.preferred_instant_jdbc_type` từ `TIMESTAMP` → `TIMESTAMP_WITH_TIMEZONE`.
+- [ ] Generate 1 entity/field test mới qua `jhipster jdl jdl.jdl`, confirm changelog sinh ra đúng `type="timestamptz"` (hoặc resolve đúng qua `${datetimeType}`).
+- [ ] Revert/xóa entity test sau khi confirm.
+
+**Branch gợi ý:** `fix/jhipster-datetimetype-timestamptz`.
+
+### Phase 2 — Migration cho bảng ĐÃ TỒN TẠI (~35-40 cột, ~20 bảng — xem mục 4)
+> Rủi ro cao nhất trong toàn bộ plan — cần test kỹ trên copy data trước khi chạy thật.
+
+- [ ] Viết Liquibase changelog mới: `ALTER TABLE ... ALTER COLUMN ... TYPE timestamptz USING col AT TIME ZONE 'UTC'` cho từng cột trong danh sách mục 4.
+- [ ] Test migration trên **copy của data thật** (không test trên bảng rỗng — không phát hiện được lỗi convert data cũ).
+- [ ] Verify kết quả bằng **psql + `SET TIME ZONE 'UTC'`** — KHÔNG dùng DBeaver để verify (mục 9, có thể che giấu lỗi).
+- [ ] Đánh giá lock time cho bảng lớn (`hourly_product_usage` tích lũy nhiều năm) — cân nhắc chạy off-peak hoặc dùng tool online schema change nếu cần.
+
+**Branch gợi ý:** `fix/migrate-timestamp-to-timestamptz`.
+
+### Phase 3 — Regression test
+- [ ] Test round-trip toàn bộ entity có field `Instant` (CRUD qua Hibernate) — kỳ vọng không đổi hành vi (mục 6 đã chứng minh Service/Controller/Mapper không cần đổi).
+- [ ] Test lại 3 native query đã rà (`ProductProcessHistoryRepositoryCustom`, `CustomerRepositoryCustom`, `RelationCustomerRepositoryCustom`, `ContactRepositoryCustom`) — kỳ vọng không cần sửa (mục 8).
+- [ ] Chạy test suite với `-Duser.timezone=America/New_York` để lộ chỗ nào còn ngầm phụ thuộc server timezone (bổ sung cho Phase 0).
+
+### Phase 4 — Rollout theo `CLAUDE.md`
+- [ ] Mỗi phase trên = 1 PR riêng vào `dev`.
+- [ ] Promote tuần tự `dev → tst → acc → prd`, mỗi promotion là PR riêng.
+- [ ] Có reviewer bắt buộc cho Phase 2 (ảnh hưởng production schema).
+
+### Điều kiện dừng / rollback
+Nếu Phase 2 phát hiện data cũ có bất thường (ví dụ do gap EDSN mục 3 gây ra trước khi fix) khi verify bằng psql — **dừng lại**, không tiếp tục ALTER, điều tra root cause trước (tương tự cách gap ở mục 9 Phần 2 được phát hiện trong phiên này).
